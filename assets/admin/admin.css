@@ -1,0 +1,27 @@
+.maw-wrap table{width:100%;border-collapse:collapse}
+.maw-wrap th,.maw-wrap td{padding:8px;vertical-align:top}
+.maw-wrap .maw-actions{display:flex;gap:8px}
+.maw-wrap input[type=text], .maw-wrap select{width:100%}
+.maw-note{color:#555;margin:8px 0 16px}
+.maw-row-disabled{opacity:0.6; pointer-events: none;}
+.maw-shortcode-field{min-width:min(20rem, 85vw);}
+#maw-shortcode-table-body [data-maw-shortcode-locked="1"] .maw-shortcode-field input { opacity: 0.6; }
+
+@media(max-width: 960px) {
+    .maw-table, .maw-row {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .maw-row td a {
+        width: fit-content;
+    }
+
+    .maw-row td input:not([type="checkbox"]), .maw-row td select {
+        width: 100% !important;
+    }
+
+    .maw-table thead {
+        display: none;
+    }
+}
