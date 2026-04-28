@@ -103,7 +103,7 @@ final class GitHubUpdater
 
             $transient->response[$pluginBasename] = (object) [
                 'slug'        => self::PLUGIN_SLUG,
-                'plugin'      => $plugin_basename,
+                'plugin'      => $pluginBasename,
                 'new_version' => $release['version'],
                 'url'         => $release['html_url'],
                 'package'     => $release['zip_url'],

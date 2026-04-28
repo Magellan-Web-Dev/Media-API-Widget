@@ -1,6 +1,5 @@
 # Media API Widget
 
-**Version:** 3.4.0  
 **Author:** Chris Paschall  
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+

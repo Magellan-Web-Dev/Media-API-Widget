@@ -2,7 +2,7 @@
 /**
  * Plugin Name:  Media API Widget
  * Description:  Sync YouTube playlists and podcast RSS data to the front end, with admin-managed Media API settings.
- * Version:      4.0.0
+ * Version:      4.0.1
  * Requires at least: 5.0
  * Requires PHP: 8.1
  * Author:       Chris Paschall
