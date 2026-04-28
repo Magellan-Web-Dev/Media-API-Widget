@@ -9,6 +9,7 @@ use MediaApiWidget\Frontend\Shortcode;
 use MediaApiWidget\Routing\PodcastPlayerRoute;
 use MediaApiWidget\Seo\MetaUpdater;
 use MediaApiWidget\Stats\ApiCallLogger;
+use MediaApiWidget\Updates\GitHubUpdater;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -69,6 +70,7 @@ final class Plugin
      * ensures default shortcode fields are present, then instantiates and
      * registers every subsystem:
      *
+     * - {@see GitHubUpdater}     — GitHub release update checking and folder normalization.
      * - {@see Menu}              — admin sidebar menu and sub-pages.
      * - {@see Assets}            — front-end CSS / JS enqueueing.
      * - {@see MediaBootstrap}    — cookie management and wp_head data injection.
@@ -82,6 +84,7 @@ final class Plugin
     {
         ApiCallLogger::maybeInstall();
         Options::maybeSeedDefaultShortcodes();
+        GitHubUpdater::init();
 
         // Admin
         (new Menu())->register();
