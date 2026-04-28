@@ -93,7 +93,7 @@ Define the YouTube playlists and podcast feeds the plugin should manage. Each it
 
 Shortcode fields are global key/value pairs stored in the database and referenceable inside any shortcode attribute value using `{{field_name}}` syntax.
 
-**Eight default fields are auto-seeded** on activation and cannot be deleted (their field names are locked). You can change their values:
+**Ten default fields are auto-seeded** on activation and cannot be deleted (their field names are locked). You can change their values:
 
 | Field | Default Value | Used For |
 |---|---|---|
@@ -105,6 +105,8 @@ Shortcode fields are global key/value pairs stored in the database and reference
 | `podcast_player_selected_color` | `#7a7a7a` | Podcast player selected episode highlight color |
 | `podcast_player_font` | `Roboto` | Podcast player font (Google Fonts name) |
 | `podcast_player_scrollbar_color` | `#c7c7c7` | Podcast player scrollbar color |
+| `lightbox_playlist_logo` | _(empty)_ | Logo image URL displayed in the lightbox playlist panel header |
+| `lightbox_playlist_border_color` | `#ffffff` | Border / theme color of the lightbox playlist panel |
 
 You can add custom fields for any value you want to centrally manage and reuse across shortcodes (e.g. `hero_title`, `brand_color`, `show_name`).
 

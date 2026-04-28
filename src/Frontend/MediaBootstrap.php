@@ -76,7 +76,7 @@ final class MediaBootstrap
      * Iterates all configured media items and emits their data scripts into wp_head.
      *
      * For each item defined in admin settings (and any items declared via the
-     * legacy MEDIA_CONTENT_DATA constant), calls {@see MediaContent::get_media_content()}
+     * legacy MEDIA_CONTENT_DATA constant), calls {@see MediaContent::getMediaContent()}
      * which handles cache lookups, API fetches, and emitting the appropriate
      * inline script tag.
      *
@@ -108,7 +108,7 @@ final class MediaBootstrap
                 continue;
             }
 
-            MediaContent::get_media_content([
+            MediaContent::getMediaContent([
                 'type'             => $item['type'] ?? 'youtube',
                 'podcast_platform' => $item['podcast_platform'] ?? 'custom',
                 'playlist_name'    => $item['playlist_name'] ?? null,

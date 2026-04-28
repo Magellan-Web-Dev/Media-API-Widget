@@ -67,6 +67,8 @@ final class Options
             ['field' => 'podcast_player_selected_color',   'value' => '#7a7a7a'],
             ['field' => 'podcast_player_font',             'value' => 'Roboto'],
             ['field' => 'podcast_player_scrollbar_color',  'value' => '#c7c7c7'],
+            ['field' => 'lightbox_playlist_logo',          'value' => ''],
+            ['field' => 'lightbox_playlist_border_color',  'value' => '#ffffff']
         ];
     }
 

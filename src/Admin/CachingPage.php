@@ -74,48 +74,54 @@ final class CachingPage
             wp_die('Insufficient permissions.');
         }
 
-        $status = isset($_GET['maw_cache_status']) ? sanitize_key((string) $_GET['maw_cache_status']) : '';
+        $status   = isset($_GET['maw_cache_status']) ? sanitize_key((string) $_GET['maw_cache_status']) : '';
         $settings = Options::getCacheExpirations();
+        ?>
+        <div class="wrap maw-wrap">
+            <h1>Caching</h1>
+            <p class="maw-note">Set cache timing values in seconds. This is used primarily for the Youtube API to avoid making excessive API calls (Youtube API has a daily limit of 10,000 calls per day).</p>
 
-        echo '<div class="wrap maw-wrap">';
-        echo '<h1>Caching</h1>';
-        echo '<p class="maw-note">Set cache timing values in seconds. This is used primarily for the Youtube API to avoid making excessive API calls (Youtube API has a daily limit of 10,000 calls per day).</p>';
+            <?php if ($status === 'saved'): ?>
+                <div class="notice notice-success is-dismissible"><p>Caching settings saved.</p></div>
+            <?php endif; ?>
 
-        if ($status === 'saved') {
-            echo '<div class="notice notice-success is-dismissible"><p>Caching settings saved.</p></div>';
-        }
+            <form method="post">
+                <?php wp_nonce_field('maw_save_cache_settings', 'maw_cache_nonce'); ?>
 
-        echo '<form method="post">';
-        wp_nonce_field('maw_save_cache_settings', 'maw_cache_nonce');
+                <table class="form-table" role="presentation"><tbody>
+                    <tr>
+                        <th scope="row"><label for="maw_media_cache_ttl">Media cache transient (seconds)</label></th>
+                        <td>
+                            <input name="maw_cache[media_cache_ttl]" id="maw_media_cache_ttl" type="number" min="1" step="1" value="<?= esc_attr((string) $settings['media_cache_ttl']) ?>" class="regular-text" />
+                            <p class="description">Used for <code>{type}_{playlist_name}</code> transient cache.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="maw_youtube_request_in_progress_ttl">YouTube request-in-progress transient (seconds)</label></th>
+                        <td>
+                            <input name="maw_cache[youtube_request_in_progress_ttl]" id="maw_youtube_request_in_progress_ttl" type="number" min="1" step="1" value="<?= esc_attr((string) $settings['youtube_request_in_progress_ttl']) ?>" class="regular-text" />
+                            <p class="description">Used for <code>{playlist_name}_youtube_request_in_progress</code>.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="maw_youtube_error_ttl">YouTube error transient (seconds)</label></th>
+                        <td>
+                            <input name="maw_cache[youtube_error_ttl]" id="maw_youtube_error_ttl" type="number" min="1" step="1" value="<?= esc_attr((string) $settings['youtube_error_ttl']) ?>" class="regular-text" />
+                            <p class="description">Used for <code>{playlist_name}_youtube_error</code>.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="maw_youtube_backup_window_seconds">YouTube backup window (seconds)</label></th>
+                        <td>
+                            <input name="maw_cache[youtube_backup_window_seconds]" id="maw_youtube_backup_window_seconds" type="number" min="1" step="1" value="<?= esc_attr((string) $settings['youtube_backup_window_seconds']) ?>" class="regular-text" />
+                            <p class="description">If the last successful fetch is within this window, backup JSON data can be used instead of refetching YouTube.</p>
+                        </td>
+                    </tr>
+                </tbody></table>
 
-        echo '<table class="form-table" role="presentation"><tbody>';
-        echo '<tr>';
-        echo '<th scope="row"><label for="maw_media_cache_ttl">Media cache transient (seconds)</label></th>';
-        echo '<td><input name="maw_cache[media_cache_ttl]" id="maw_media_cache_ttl" type="number" min="1" step="1" value="' . esc_attr((string) $settings['media_cache_ttl']) . '" class="regular-text" />';
-        echo '<p class="description">Used for <code>{type}_{playlist_name}</code> transient cache.</p></td>';
-        echo '</tr>';
-
-        echo '<tr>';
-        echo '<th scope="row"><label for="maw_youtube_request_in_progress_ttl">YouTube request-in-progress transient (seconds)</label></th>';
-        echo '<td><input name="maw_cache[youtube_request_in_progress_ttl]" id="maw_youtube_request_in_progress_ttl" type="number" min="1" step="1" value="' . esc_attr((string) $settings['youtube_request_in_progress_ttl']) . '" class="regular-text" />';
-        echo '<p class="description">Used for <code>{playlist_name}_youtube_request_in_progress</code>.</p></td>';
-        echo '</tr>';
-
-        echo '<tr>';
-        echo '<th scope="row"><label for="maw_youtube_error_ttl">YouTube error transient (seconds)</label></th>';
-        echo '<td><input name="maw_cache[youtube_error_ttl]" id="maw_youtube_error_ttl" type="number" min="1" step="1" value="' . esc_attr((string) $settings['youtube_error_ttl']) . '" class="regular-text" />';
-        echo '<p class="description">Used for <code>{playlist_name}_youtube_error</code>.</p></td>';
-        echo '</tr>';
-
-        echo '<tr>';
-        echo '<th scope="row"><label for="maw_youtube_backup_window_seconds">YouTube backup window (seconds)</label></th>';
-        echo '<td><input name="maw_cache[youtube_backup_window_seconds]" id="maw_youtube_backup_window_seconds" type="number" min="1" step="1" value="' . esc_attr((string) $settings['youtube_backup_window_seconds']) . '" class="regular-text" />';
-        echo '<p class="description">If the last successful fetch is within this window, backup JSON data can be used instead of refetching YouTube.</p></td>';
-        echo '</tr>';
-        echo '</tbody></table>';
-
-        echo '<p><button type="submit" class="button button-primary" name="maw_save_cache_settings" value="1">Save caching settings</button></p>';
-        echo '</form>';
-        echo '</div>';
+                <p><button type="submit" class="button button-primary" name="maw_save_cache_settings" value="1">Save caching settings</button></p>
+            </form>
+        </div>
+        <?php
     }
 }

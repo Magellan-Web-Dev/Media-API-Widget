@@ -99,9 +99,9 @@ final class GitHubUpdater
         $current = defined('MAW_PLUGIN_VERSION') ? MAW_PLUGIN_VERSION : '0.0.0';
 
         if (version_compare($release['version'], $current, '>')) {
-            $plugin_basename = self::pluginBasename();
+            $pluginBasename = self::pluginBasename();
 
-            $transient->response[$plugin_basename] = (object) [
+            $transient->response[$pluginBasename] = (object) [
                 'slug'        => self::PLUGIN_SLUG,
                 'plugin'      => $plugin_basename,
                 'new_version' => $release['version'],
@@ -227,9 +227,9 @@ final class GitHubUpdater
             $msg = 'Media API Widget: Could not check for updates. The GitHub repository or release API may be unavailable.';
         }
 
-        $notice_class = $release ? 'notice-success' : 'notice-warning';
+        $noticeClass = $release ? 'notice-success' : 'notice-warning';
 
-        echo '<div class="notice ' . esc_attr($notice_class) . ' is-dismissible"><p>' . wp_kses_post($msg) . '</p></div>';
+        echo '<div class="notice ' . esc_attr($noticeClass) . ' is-dismissible"><p>' . wp_kses_post($msg) . '</p></div>';
     }
 
     /**
@@ -329,11 +329,11 @@ final class GitHubUpdater
             return $response;
         }
 
-        $desired_dir   = trailingslashit(WP_PLUGIN_DIR) . self::DESIRED_FOLDER;
-        $installed_dir = rtrim(wp_normalize_path((string) $result['destination']), '/');
+        $desiredDir   = trailingslashit(WP_PLUGIN_DIR) . self::DESIRED_FOLDER;
+        $installedDir = rtrim(wp_normalize_path((string) $result['destination']), '/');
 
         // Already in the right place — nothing to do.
-        if ($installed_dir === rtrim(wp_normalize_path($desired_dir), '/')) {
+        if ($installedDir === rtrim(wp_normalize_path($desiredDir), '/')) {
             return $response;
         }
 
@@ -347,34 +347,34 @@ final class GitHubUpdater
         }
 
         // Confirm our plugin file is actually present in the installed directory.
-        if (!$wp_filesystem->exists(trailingslashit($installed_dir) . self::PLUGIN_FILE)) {
+        if (!$wp_filesystem->exists(trailingslashit($installedDir) . self::PLUGIN_FILE)) {
             return $response;
         }
 
         // If a stale correctly-named directory exists, back it up so we can
         // restore it if the rename below fails.
-        $backup_dir = null;
-        if ($wp_filesystem->is_dir($desired_dir)) {
-            $backup_dir = $desired_dir . '_maw_backup';
-            if (!$wp_filesystem->move($desired_dir, $backup_dir)) {
+        $backupDir = null;
+        if ($wp_filesystem->is_dir($desiredDir)) {
+            $backupDir = $desiredDir . '_maw_backup';
+            if (!$wp_filesystem->move($desiredDir, $backupDir)) {
                 // Can't move the stale dir out of the way — fall back to deleting it.
-                $wp_filesystem->delete($desired_dir, true);
-                $backup_dir = null;
+                $wp_filesystem->delete($desiredDir, true);
+                $backupDir = null;
             }
         }
 
         // Move to the canonical folder name.
-        if (!$wp_filesystem->move($installed_dir, $desired_dir)) {
+        if (!$wp_filesystem->move($installedDir, $desiredDir)) {
             // Rename failed; restore the backup so the plugin is not left missing.
-            if ($backup_dir && $wp_filesystem->is_dir($backup_dir)) {
-                $wp_filesystem->move($backup_dir, $desired_dir);
+            if ($backupDir && $wp_filesystem->is_dir($backupDir)) {
+                $wp_filesystem->move($backupDir, $desiredDir);
             }
             return $response;
         }
 
         // Rename succeeded — remove the backup.
-        if ($backup_dir && $wp_filesystem->is_dir($backup_dir)) {
-            $wp_filesystem->delete($backup_dir, true);
+        if ($backupDir && $wp_filesystem->is_dir($backupDir)) {
+            $wp_filesystem->delete($backupDir, true);
         }
 
         wp_clean_plugins_cache(true);

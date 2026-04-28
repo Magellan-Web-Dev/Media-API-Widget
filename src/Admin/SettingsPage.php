@@ -105,71 +105,66 @@ final class SettingsPage
 
         $items = Options::getMediaItems();
         $shortcodes = Options::getShortcodes();
+        ?>
+        <div class="wrap maw-wrap">
+            <h1>Media API</h1>
+            <p class="maw-note">Define YouTube playlists and Podcast feeds here. The front-end rendering remains driven by the existing widget JS, but you no longer need WPCode constants.</p>
 
-        echo '<div class="wrap maw-wrap">';
-        echo '<h1>Media API</h1>';
-        echo '<p class="maw-note">Define YouTube playlists and Podcast feeds here. The front-end rendering remains driven by the existing widget JS, but you no longer need WPCode constants.</p>';
+            <?php if ($message) : ?>
+                <div class="notice <?= esc_attr($messageClass) ?> is-dismissible"><p><?= esc_html($message) ?></p></div>
+            <?php endif; ?>
 
-        if ($message) {
-            echo '<div class="notice ' . esc_attr($messageClass) . ' is-dismissible"><p>' . esc_html($message) . '</p></div>';
-        }
+            <form method="post">
+                <?php wp_nonce_field('maw_save_settings', 'maw_nonce'); ?>
 
-        echo '<form method="post">';
-        wp_nonce_field('maw_save_settings', 'maw_nonce');
+                <h2>Media Items</h2>
+                <p class="maw-actions">
+                    <a href="#" class="button button-secondary" data-maw-add="youtube">Add YouTube playlist</a>
+                    <a href="#" class="button button-secondary" data-maw-add="podcast">Add Podcast</a>
+                </p>
 
-        echo '<h2>Media Items</h2>';
-        echo '<p class="maw-actions">';
-        echo '<a href="#" class="button button-secondary" data-maw-add="youtube">Add YouTube playlist</a> ';
-        echo '<a href="#" class="button button-secondary" data-maw-add="podcast">Add Podcast</a>';
-        echo '</p>';
+                <table class="widefat striped maw-table"><thead><tr>
+                    <th style="width:120px;">Type</th>
+                    <th style="width:220px;">Name (playlist_name)</th>
+                    <th>Settings</th>
+                    <th style="width:90px;">Actions</th>
+                </tr></thead><tbody id="maw-table-body">
+                    <?php foreach ($items as $i => $item) : ?>
+                        <?php $this->renderRow($i, $item); ?>
+                    <?php endforeach; ?>
+                </tbody></table>
 
-        echo '<table class="widefat striped maw-table"><thead><tr>';
-        echo '<th style="width:120px;">Type</th>';
-        echo '<th style="width:220px;">Name (playlist_name)</th>';
-        echo '<th>Settings</th>';
-        echo '<th style="width:90px;">Actions</th>';
-        echo '</tr></thead><tbody id="maw-table-body">';
+                <h2>Shortcodes</h2>
+                <p class="maw-note">Shortcodes will be [media-api-widget] with an attribute of "field" corresponding to the field name defined.  These can also be accessed in the [media-api-widget-render] for podcast player styling, with its value being the shortcode field value wrapped in double quotes, such as podcastplayercolor="{{podcastplayercolor}}"].</p>
+                <p class="maw-actions">
+                    <a href="#" class="button button-secondary" data-maw-shortcode-add="1">Add shortcode field</a>
+                </p>
 
-        foreach ($items as $i => $item) {
-            $this->renderRow($i, $item);
-        }
+                <table class="widefat striped maw-table maw-shortcode-table"><thead><tr>
+                    <th style="width:220px;">Field</th>
+                    <th>Value</th>
+                    <th style="width:90px;">Actions</th>
+                </tr></thead><tbody id="maw-shortcode-table-body">
+                    <?php foreach ($shortcodes as $i => $shortcode) : ?>
+                        <?php $this->renderShortcodeRow($i, $shortcode); ?>
+                    <?php endforeach; ?>
+                </tbody></table>
 
-        echo '</tbody></table>';
+                <p>
+                    <button type="submit" class="button button-primary" name="maw_save" value="1">Save changes</button>
+                    <button type="submit" class="button button-secondary" name="maw_clear_cache" value="1">Clear plugin cache</button>
+                </p>
+            </form>
 
-        echo '<h2>Shortcodes</h2>';
-        echo '<p class="maw-note">Shortcodes will be [media-api-widget] with an attribute of "field" corresponding to the field name defined.  These can also be accessed in the [media-api-widget-render] for podcast player styling, with its value being the shortcode field value wrapped in double quotes, such as podcastplayercolor="{{podcastplayercolor}}"].</p>';
-        echo '<p class="maw-actions">';
-        echo '<a href="#" class="button button-secondary" data-maw-shortcode-add="1">Add shortcode field</a>';
-        echo '</p>';
+            <script type="text/template" id="maw-row-template">
+                <?php $this->renderRow('__INDEX__', ['type' => '__TYPE__'], true); ?>
+            </script>
 
-        echo '<table class="widefat striped maw-table maw-shortcode-table"><thead><tr>';
-        echo '<th style="width:220px;">Field</th>';
-        echo '<th>Value</th>';
-        echo '<th style="width:90px;">Actions</th>';
-        echo '</tr></thead><tbody id="maw-shortcode-table-body">';
-
-        foreach ($shortcodes as $i => $shortcode) {
-            $this->renderShortcodeRow($i, $shortcode);
-        }
-
-        echo '</tbody></table>';
-
-        echo '<p>';
-        echo '<button type="submit" class="button button-primary" name="maw_save" value="1">Save changes</button> ';
-        echo '<button type="submit" class="button button-secondary" name="maw_clear_cache" value="1">Clear plugin cache</button>';
-        echo '</p>';
-        echo '</form>';
-
-        // Row template for JS
-        echo '<script type="text/template" id="maw-row-template">';
-        $this->renderRow('__INDEX__', ['type' => '__TYPE__'], true);
-        echo '</script>';
-
-        echo '<script type="text/template" id="maw-shortcode-row-template">';
-        $this->renderShortcodeRow('__INDEX__', ['field' => '', 'value' => ''], true);
-        echo '</script>';
-
-        echo '</div>';
+            <script type="text/template" id="maw-shortcode-row-template">
+                <?php $this->renderShortcodeRow('__INDEX__', ['field' => '', 'value' => ''], true); ?>
+            </script>
+        </div>
+        <?php
     }
 
     /**
@@ -195,11 +190,11 @@ final class SettingsPage
     {
         $type = isset($item['type']) ? (string) $item['type'] : 'youtube';
 
-        $playlistName = $item['playlist_name'] ?? '';
-        $apiKey = $item['api_key'] ?? '';
-        $mediaData = $item['media_data'] ?? '';
-        $sortMode = $item['sort_mode'] ?? 'normal';
-        $loadFull = !empty($item['load_full_playlist']);
+        $playlistName    = $item['playlist_name'] ?? '';
+        $apiKey          = $item['api_key'] ?? '';
+        $mediaData       = $item['media_data'] ?? '';
+        $sortMode        = $item['sort_mode'] ?? 'normal';
+        $loadFull        = !empty($item['load_full_playlist']);
         $podcastPlatform = $item['podcast_platform'] ?? 'custom';
 
         // Names are set server-side so saving works even if admin JS fails to load.
@@ -208,59 +203,54 @@ final class SettingsPage
         $dataBase = 'maw_items[__INDEX__]';
 
         $disabledStyling = $unSaved ? '' : 'maw-row-disabled';
-        $ytStyle = ($type === 'youtube') ? '' : ' style="display:none"';
-        $podStyle = ($type === 'podcast') ? '' : ' style="display:none"';
+        $ytStyle         = ($type === 'youtube') ? '' : ' style="display:none"';
+        $podStyle        = ($type === 'podcast') ? '' : ' style="display:none"';
+        $ytDisabled      = ($type === 'youtube') ? '' : ' disabled';
+        $podDisabled     = ($type === 'podcast') ? '' : ' disabled';
+        ?>
+        <tr data-maw-row="1" class="maw-row">
+            <td>
+                <label>Type</label>
+                <select class="<?= $disabledStyling ?>" name="<?= esc_attr($nameBase . '[type]') ?>" data-maw-type-select="1" data-maw-name="<?= esc_attr($dataBase . '[type]') ?>" required>
+                    <?php foreach (['youtube' => 'YouTube', 'podcast' => 'Podcast'] as $v => $label) : ?>
+                        <?php $sel = ($type === $v) ? 'selected' : ''; ?>
+                        <option value="<?= esc_attr($v) ?>" <?= $sel ?>><?= esc_html($label) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </td>
 
-        echo '<tr data-maw-row="1" class="maw-row">';
-        echo '<td>';
-        echo '<label>Type</label>';
-        echo '<select class="'.$disabledStyling.'" name="' . esc_attr($nameBase . '[type]') . '" data-maw-type-select="1" data-maw-name="' . esc_attr($dataBase . '[type]') . '" required>';
-        foreach (['youtube' => 'YouTube', 'podcast' => 'Podcast'] as $v => $label) {
-            $sel = ($type === $v) ? 'selected' : '';
-            echo '<option value="' . esc_attr($v) . '" ' . $sel . '>' . esc_html($label) . '</option>';
-        }
-        echo '</select>';
-        echo '</td>';
+            <td>
+                <label>Name (playlist_name)</label>
+                <input class="<?= $disabledStyling ?>" type="text" name="<?= esc_attr($nameBase . '[playlist_name]') ?>" data-maw-name="<?= esc_attr($dataBase . '[playlist_name]') ?>" value="<?= esc_attr($playlistName) ?>" placeholder="e.g. show_name" required /></td>
 
-        echo '<td>';
-        echo '<label>Name (playlist_name)</label>';
-        echo '<input class="'.$disabledStyling.'" type="text" name="' . esc_attr($nameBase . '[playlist_name]') . '" data-maw-name="' . esc_attr($dataBase . '[playlist_name]') . '" value="' . esc_attr($playlistName) . '" placeholder="e.g. show_name" required /></td>';
+            <td>
+                <div data-maw-fields="youtube"<?= $ytStyle ?>>
+                    <p><label>Playlist ID<br><input type="text" name="<?= esc_attr($nameBase . '[media_data]') ?>" data-maw-name="<?= esc_attr($dataBase . '[media_data]') ?>" value="<?= esc_attr($type === 'youtube' ? $mediaData : '') ?>"<?= $ytDisabled ?> /></label></p>
+                    <p><label>API key<br><input type="text" name="<?= esc_attr($nameBase . '[api_key]') ?>" data-maw-name="<?= esc_attr($dataBase . '[api_key]') ?>" value="<?= esc_attr($type === 'youtube' ? $apiKey : '') ?>" /></label></p>
+                    <p><label>Sort mode (For TV shows from the Magellan Youtube, use "Number in title")<br><select name="<?= esc_attr($nameBase . '[sort_mode]') ?>" data-maw-name="<?= esc_attr($dataBase . '[sort_mode]') ?>">
+                        <?php foreach (['normal' => 'Normal', 'number_in_title' => 'Number in title'] as $v => $label) : ?>
+                            <?php $sel = (($type === 'youtube' ? $sortMode : 'normal') === $v) ? 'selected' : ''; ?>
+                            <option value="<?= esc_attr($v) ?>" <?= $sel ?>><?= esc_html($label) ?></option>
+                        <?php endforeach; ?>
+                    </select></label></p>
+                    <p><label><input type="checkbox" name="<?= esc_attr($nameBase . '[load_full_playlist]') ?>" data-maw-name="<?= esc_attr($dataBase . '[load_full_playlist]') ?>" value="1" <?= ($type === 'youtube' && $loadFull) ? 'checked' : '' ?> /> Load full playlist (otherwise first 6)</label></p>
+                </div>
 
-        echo '<td>';
+                <div data-maw-fields="podcast"<?= $podStyle ?>>
+                    <p><label>Platform<br><select name="<?= esc_attr($nameBase . '[podcast_platform]') ?>" data-maw-name="<?= esc_attr($dataBase . '[podcast_platform]') ?>">
+                        <?php foreach (['custom' => 'Direct RSS URL', 'omny' => 'Omny', 'soundcloud' => 'SoundCloud', 'buzzsprout' => 'Buzzsprout', 'other' => 'Other (Apple lookup)', 'embed' => 'Embed URL'] as $v => $label) : ?>
+                            <?php $sel = (($type === 'podcast' ? $podcastPlatform : 'custom') === $v) ? 'selected' : ''; ?>
+                            <option value="<?= esc_attr($v) ?>" <?= $sel ?>><?= esc_html($label) ?></option>
+                        <?php endforeach; ?>
+                    </select></label></p>
+                    <p><label>RSS URL / ID / Embed URL (media_data)<br><input type="text" name="<?= esc_attr($nameBase . '[media_data]') ?>" data-maw-name="<?= esc_attr($dataBase . '[media_data]') ?>" value="<?= esc_attr($type === 'podcast' ? $mediaData : '') ?>"<?= $podDisabled ?> /></label></p>
+                    <p class="description">For "Direct RSS URL", paste the RSS feed URL. For Omny/SoundCloud/Buzzsprout/Other, use the Apple podcast ID (numeric). For "Embed URL", paste the embed URL.</p>
+                </div>
+            </td>
 
-        // Determine disabled states for fields
-        $ytDisabled  = ($type === 'youtube') ? '' : ' disabled';
-        $podDisabled = ($type === 'podcast') ? '' : ' disabled';
-
-        // YouTube fields
-        echo '<div data-maw-fields="youtube"' . $ytStyle . '>';
-        echo '<p><label>Playlist ID<br><input type="text" name="' . esc_attr($nameBase . '[media_data]') . '" data-maw-name="' . esc_attr($dataBase . '[media_data]') . '" value="' . esc_attr($type === 'youtube' ? $mediaData : '') . '" ' . $ytDisabled . ' /></label></p>';
-        echo '<p><label>API key<br><input type="text" name="' . esc_attr($nameBase . '[api_key]') . '" data-maw-name="' . esc_attr($dataBase . '[api_key]') . '" value="' . esc_attr($type === 'youtube' ? $apiKey : '') . '" /></label></p>';
-        echo '<p><label>Sort mode (For TV shows from the Magellan Youtube, use "Number in title")<br><select name="' . esc_attr($nameBase . '[sort_mode]') . '" data-maw-name="' . esc_attr($dataBase . '[sort_mode]') . '">';
-        foreach (['normal' => 'Normal', 'number_in_title' => 'Number in title'] as $v => $label) {
-            $sel = (($type === 'youtube' ? $sortMode : 'normal') === $v) ? 'selected' : '';
-            echo '<option value="' . esc_attr($v) . '" ' . $sel . '>' . esc_html($label) . '</option>';
-        }
-        echo '</select></label></p>';
-        echo '<p><label><input type="checkbox" name="' . esc_attr($nameBase . '[load_full_playlist]') . '" data-maw-name="' . esc_attr($dataBase . '[load_full_playlist]') . '" value="1" ' . ($type === 'youtube' && $loadFull ? 'checked' : '') . ' /> Load full playlist (otherwise first 6)</label></p>';
-        echo '</div>';
-
-        // Podcast fields
-        echo '<div data-maw-fields="podcast"' . $podStyle . '>';
-        echo '<p><label>Platform<br><select name="' . esc_attr($nameBase . '[podcast_platform]') . '" data-maw-name="' . esc_attr($dataBase . '[podcast_platform]') . '">';
-        foreach (['custom' => 'Direct RSS URL', 'omny' => 'Omny', 'soundcloud' => 'SoundCloud', 'buzzsprout' => 'Buzzsprout', 'other' => 'Other (Apple lookup)', 'embed' => 'Embed URL'] as $v => $label) {
-            $sel = (($type === 'podcast' ? $podcastPlatform : 'custom') === $v) ? 'selected' : '';
-            echo '<option value="' . esc_attr($v) . '" ' . $sel . '>' . esc_html($label) . '</option>';
-        }
-        echo '</select></label></p>';
-        echo '<p><label>RSS URL / ID / Embed URL (media_data)<br><input type="text" name="' . esc_attr($nameBase . '[media_data]') . '" data-maw-name="' . esc_attr($dataBase . '[media_data]') . '" value="' . esc_attr($type === 'podcast' ? $mediaData : '') . '" ' . $podDisabled . ' /></label></p>';
-        echo '<p class="description">For "Direct RSS URL", paste the RSS feed URL. For Omny/SoundCloud/Buzzsprout/Other, use the Apple podcast ID (numeric). For "Embed URL", paste the embed URL.</p>';
-        echo '</div>';
-
-        echo '</td>';
-
-        echo '<td><a href="#" class="button button-link-delete" data-maw-delete="1">Remove</a></td>';
-        echo '</tr>';
+            <td><a href="#" class="button button-link-delete" data-maw-delete="1">Remove</a></td>
+        </tr>
+        <?php
     }
 
     /**
@@ -279,28 +269,29 @@ final class SettingsPage
      */
     private function renderShortcodeRow($index, array $item, bool $unSaved = false): void
     {
-        $field = $item['field'] ?? '';
-        $value = $item['value'] ?? '';
+        $field    = $item['field'] ?? '';
+        $value    = $item['value'] ?? '';
         $isPreset = !$unSaved && Options::isDefaultShortcodeField((string) $field);
 
         $nameBase = is_numeric($index) ? 'maw_shortcodes[' . (int) $index . ']' : 'maw_shortcodes[__INDEX__]';
         $dataBase = 'maw_shortcodes[__INDEX__]';
-
-        echo '<tr data-maw-shortcode-row="1" class="maw-row maw-shortcode-row"' . ($isPreset ? ' data-maw-shortcode-locked="1"' : '') . '>';
-        echo '<td class="maw-shortcode-field">';
-        echo '<label>Field</label>';
-        echo '<input type="text" name="' . esc_attr($nameBase . '[field]') . '" data-maw-shortcode-name="' . esc_attr($dataBase . '[field]') . '" value="' . esc_attr($field) . '" placeholder="e.g. hero_title" ' . ($isPreset ? 'readonly="readonly"' : '') . ' />';
-        echo '</td>';
-        echo '<td class="maw-value-field">';
-        echo '<label>Value</label>';
-        echo '<input type="text" name="' . esc_attr($nameBase . '[value]') . '" data-maw-shortcode-name="' . esc_attr($dataBase . '[value]') . '" value="' . esc_attr($value) . '" />';
-        echo '</td>';
-        echo '<td>';
-        if (!$isPreset) {
-            echo '<a href="#" class="button button-link-delete" data-maw-shortcode-delete="1">Remove</a>';
-        }
-        echo '</td>';
-        echo '</tr>';
+        ?>
+        <tr data-maw-shortcode-row="1" class="maw-row maw-shortcode-row"<?= $isPreset ? ' data-maw-shortcode-locked="1"' : '' ?>>
+            <td class="maw-shortcode-field">
+                <label>Field</label>
+                <input type="text" name="<?= esc_attr($nameBase . '[field]') ?>" data-maw-shortcode-name="<?= esc_attr($dataBase . '[field]') ?>" value="<?= esc_attr($field) ?>" placeholder="e.g. hero_title" <?= $isPreset ? 'readonly="readonly"' : '' ?> />
+            </td>
+            <td class="maw-value-field">
+                <label>Value</label>
+                <input type="text" name="<?= esc_attr($nameBase . '[value]') ?>" data-maw-shortcode-name="<?= esc_attr($dataBase . '[value]') ?>" value="<?= esc_attr($value) ?>" />
+            </td>
+            <td>
+                <?php if (!$isPreset) : ?>
+                    <a href="#" class="button button-link-delete" data-maw-shortcode-delete="1">Remove</a>
+                <?php endif; ?>
+            </td>
+        </tr>
+        <?php
     }
 
     /**

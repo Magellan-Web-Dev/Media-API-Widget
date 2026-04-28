@@ -41,60 +41,60 @@ final class StatsPage
         $hourly    = ApiCallLogger::getHourlySince($sinceGmt);
 
         $timezone = wp_timezone();
+        ?>
+        <div class="wrap maw-wrap">
+            <h1>Media API Statistics</h1>
+            <p class="maw-note">Showing API request activity recorded in the last 24 hours (since <?= esc_html(wp_date('M j, Y g:i A T', $sinceTimestampGmt, $timezone)) ?>).</p>
 
-        echo '<div class="wrap maw-wrap">';
-        echo '<h1>Media API Statistics</h1>';
-        echo '<p class="maw-note">Showing API request activity recorded in the last 24 hours (since ' . esc_html(wp_date('M j, Y g:i A T', $sinceTimestampGmt, $timezone)) . ').</p>';
+            <table class="widefat striped maw-table" style="max-width:720px;"><tbody>
+                <tr><th>Total API calls</th><td><?= esc_html((string) $totals['total_calls']) ?></td></tr>
+                <tr><th>Successful calls</th><td><?= esc_html((string) $totals['success_calls']) ?></td></tr>
+                <tr><th>Errored calls</th><td><?= esc_html((string) $totals['error_calls']) ?></td></tr>
+            </tbody></table>
 
-        echo '<table class="widefat striped maw-table" style="max-width:720px;"><tbody>';
-        echo '<tr><th>Total API calls</th><td>' . esc_html((string) $totals['total_calls']) . '</td></tr>';
-        echo '<tr><th>Successful calls</th><td>' . esc_html((string) $totals['success_calls']) . '</td></tr>';
-        echo '<tr><th>Errored calls</th><td>' . esc_html((string) $totals['error_calls']) . '</td></tr>';
-        echo '</tbody></table>';
+            <h2>By Playlist and Endpoint</h2>
+            <?php if (count($breakdown) === 0) : ?>
+                <p>No API calls recorded in the last 24 hours.</p>
+            <?php else : ?>
+                <table class="widefat striped maw-table"><thead><tr>
+                    <th>Playlist</th><th>Type</th><th>Endpoint</th><th>Total</th><th>Errors</th>
+                </tr></thead><tbody>
+                    <?php foreach ($breakdown as $row) : ?>
+                        <tr>
+                            <td><?= esc_html((string) ($row['playlist_name'] ?? '')) ?></td>
+                            <td><?= esc_html((string) ($row['media_type'] ?? '')) ?></td>
+                            <td><?= esc_html((string) ($row['endpoint'] ?? '')) ?></td>
+                            <td><?= esc_html((string) (int) ($row['total_calls'] ?? 0)) ?></td>
+                            <td><?= esc_html((string) (int) ($row['error_calls'] ?? 0)) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody></table>
+            <?php endif; ?>
 
-        echo '<h2>By Playlist and Endpoint</h2>';
-        if (count($breakdown) === 0) {
-            echo '<p>No API calls recorded in the last 24 hours.</p>';
-        } else {
-            echo '<table class="widefat striped maw-table"><thead><tr>';
-            echo '<th>Playlist</th><th>Type</th><th>Endpoint</th><th>Total</th><th>Errors</th>';
-            echo '</tr></thead><tbody>';
-            foreach ($breakdown as $row) {
-                echo '<tr>';
-                echo '<td>' . esc_html((string) ($row['playlist_name'] ?? '')) . '</td>';
-                echo '<td>' . esc_html((string) ($row['media_type'] ?? '')) . '</td>';
-                echo '<td>' . esc_html((string) ($row['endpoint'] ?? '')) . '</td>';
-                echo '<td>' . esc_html((string) (int) ($row['total_calls'] ?? 0)) . '</td>';
-                echo '<td>' . esc_html((string) (int) ($row['error_calls'] ?? 0)) . '</td>';
-                echo '</tr>';
-            }
-            echo '</tbody></table>';
-        }
-
-        echo '<h2>By Hour</h2>';
-        if (count($hourly) === 0) {
-            echo '<p>No hourly data yet for the last 24 hours.</p>';
-        } else {
-            echo '<table class="widefat striped maw-table"><thead><tr>';
-            echo '<th>Hour</th><th>Playlist</th><th>Type</th><th>Endpoint</th><th>Total</th><th>Errors</th>';
-            echo '</tr></thead><tbody>';
-            foreach ($hourly as $row) {
-                $hourGmt       = (string) ($row['hour_gmt'] ?? '');
-                $hourTimestamp = strtotime($hourGmt . ' UTC');
-                $hourLabel     = $hourTimestamp ? wp_date('M j, Y g:i A T', $hourTimestamp, $timezone) : $hourGmt . ' UTC';
-
-                echo '<tr>';
-                echo '<td>' . esc_html($hourLabel) . '</td>';
-                echo '<td>' . esc_html((string) ($row['playlist_name'] ?? '')) . '</td>';
-                echo '<td>' . esc_html((string) ($row['media_type'] ?? '')) . '</td>';
-                echo '<td>' . esc_html((string) ($row['endpoint'] ?? '')) . '</td>';
-                echo '<td>' . esc_html((string) (int) ($row['total_calls'] ?? 0)) . '</td>';
-                echo '<td>' . esc_html((string) (int) ($row['error_calls'] ?? 0)) . '</td>';
-                echo '</tr>';
-            }
-            echo '</tbody></table>';
-        }
-
-        echo '</div>';
+            <h2>By Hour</h2>
+            <?php if (count($hourly) === 0) : ?>
+                <p>No hourly data yet for the last 24 hours.</p>
+            <?php else : ?>
+                <table class="widefat striped maw-table"><thead><tr>
+                    <th>Hour</th><th>Playlist</th><th>Type</th><th>Endpoint</th><th>Total</th><th>Errors</th>
+                </tr></thead><tbody>
+                    <?php foreach ($hourly as $row) :
+                        $hourGmt       = (string) ($row['hour_gmt'] ?? '');
+                        $hourTimestamp = strtotime($hourGmt . ' UTC');
+                        $hourLabel     = $hourTimestamp ? wp_date('M j, Y g:i A T', $hourTimestamp, $timezone) : $hourGmt . ' UTC';
+                    ?>
+                        <tr>
+                            <td><?= esc_html($hourLabel) ?></td>
+                            <td><?= esc_html((string) ($row['playlist_name'] ?? '')) ?></td>
+                            <td><?= esc_html((string) ($row['media_type'] ?? '')) ?></td>
+                            <td><?= esc_html((string) ($row['endpoint'] ?? '')) ?></td>
+                            <td><?= esc_html((string) (int) ($row['total_calls'] ?? 0)) ?></td>
+                            <td><?= esc_html((string) (int) ($row['error_calls'] ?? 0)) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody></table>
+            <?php endif; ?>
+        </div>
+        <?php
     }
 }

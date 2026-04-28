@@ -34,7 +34,7 @@ final class MediaContent
      *
      * @return string Absolute directory path with trailing slash.
      */
-    public static function backup_dir(): string
+    public static function backupDir(): string
     {
         $upload = wp_upload_dir();
         $base = rtrim($upload['basedir'] ?? WP_CONTENT_DIR . '/uploads', '/');
@@ -54,7 +54,7 @@ final class MediaContent
      * @param string $title The video title to parse (e.g. "042 - Episode Name").
      * @return int Episode number (1–1999), or -1 if none found.
      */
-    public static function episode_number_generator(string $title): int
+    public static function episodeNumberGenerator(string $title): int
     {
         $output = '';
         $splitter = str_split($title);
@@ -81,20 +81,20 @@ final class MediaContent
      * confirming the class exists. Silently returns when the Stats module is
      * unavailable, keeping this class free of hard dependencies.
      *
-     * @param string $playlist_name Playlist/feed slug for the log row.
-     * @param string $type          Media type ('youtube' or 'podcast').
-     * @param string $endpoint      Endpoint identifier (e.g. 'youtube_playlist_items').
-     * @param mixed  $response      Raw return value from wp_remote_get().
+     * @param string $playlistName Playlist/feed slug for the log row.
+     * @param string $type         Media type ('youtube' or 'podcast').
+     * @param string $endpoint     Endpoint identifier (e.g. 'youtube_playlist_items').
+     * @param mixed  $response     Raw return value from wp_remote_get().
      * @return void
      */
-    public static function log_api_call_event(string $playlist_name, string $type, string $endpoint, $response): void
+    public static function logApiCallEvent(string $playlistName, string $type, string $endpoint, $response): void
     {
         if (!class_exists('\\MediaApiWidget\\Stats\\ApiCallLogger')) {
             return;
         }
 
         \MediaApiWidget\Stats\ApiCallLogger::log(
-            (string) $playlist_name,
+            (string) $playlistName,
             (string) $type,
             (string) $endpoint,
             $response
@@ -104,7 +104,7 @@ final class MediaContent
     /**
      * Wraps wp_remote_get() with automatic API call logging.
      *
-     * Makes the HTTP request, then calls {@see self::log_api_call_event()}
+     * Makes the HTTP request, then calls {@see self::logApiCallEvent()}
      * with the context metadata and the raw response. The context array
      * should contain 'playlist_name', 'type', and 'endpoint' keys.
      *
@@ -112,11 +112,11 @@ final class MediaContent
      * @param array<string,mixed> $context Metadata for the log entry.
      * @return array|\WP_Error    Raw wp_remote_get() return value.
      */
-    public static function tracked_remote_get(string $url, array $context = [])
+    public static function trackedRemoteGet(string $url, array $context = [])
     {
         $response = wp_remote_get($url);
 
-        self::log_api_call_event(
+        self::logApiCallEvent(
             $context['playlist_name'] ?? '',
             $context['type'] ?? '',
             $context['endpoint'] ?? 'external_request',
@@ -129,78 +129,78 @@ final class MediaContent
     /**
      * Fetches and parses a podcast RSS feed, optionally via an iTunes lookup.
      *
-     * When `$apple_data` is true, treats `$rss_feed_input` as a raw JSON
+     * When `$appleData` is true, treats `$rssFeedInput` as a raw JSON
      * response from the iTunes lookup API, extracts the feedUrl from the first
-     * result, and fetches that RSS URL. When false, `$rss_feed_input` is used
+     * result, and fetches that RSS URL. When false, `$rssFeedInput` is used
      * directly as the RSS URL.
      *
      * Strips HTML tags from each episode's title and description. Attaches
      * the RSS URL and Apple collection view URL to the parsed feed's channel
      * element. Returns null on any network or parse error.
      *
-     * @param string|null         $rss_feed_input RSS URL (when $apple_data is false) or
-     *                                            iTunes lookup JSON body (when true).
-     * @param bool                $apple_data     True when $rss_feed_input is iTunes JSON.
-     * @param array<string,mixed> $context        Metadata for API call logging.
+     * @param string|null         $rssFeedInput RSS URL (when $appleData is false) or
+     *                                          iTunes lookup JSON body (when true).
+     * @param bool                $appleData    True when $rssFeedInput is iTunes JSON.
+     * @param array<string,mixed> $context      Metadata for API call logging.
      * @return \SimpleXMLElement|null Parsed RSS document, or null on failure.
      */
-    public static function parse_rss_feed(?string $rss_feed_input = null, bool $apple_data = false, array $context = [])
+    public static function parseRssFeed(?string $rssFeedInput = null, bool $appleData = false, array $context = [])
     {
-        if ($rss_feed_input) {
-            $rss_url = null;
-            $get_rss_data = null;
+        if ($rssFeedInput) {
+            $rssUrl      = null;
+            $getRssData  = null;
 
-            if ($apple_data) {
-                $get_rss_data = json_decode($rss_feed_input);
+            if ($appleData) {
+                $getRssData = json_decode($rssFeedInput);
 
-                if (!$get_rss_data || empty(get_object_vars($get_rss_data)['results'][0]->feedUrl)) {
+                if (!$getRssData || empty(get_object_vars($getRssData)['results'][0]->feedUrl)) {
                     return null;
                 }
 
                 // Extract RSS Feed Url From JSON data from iTunes
-                $rss_url = get_object_vars($get_rss_data)['results'][0]->feedUrl;
+                $rssUrl = get_object_vars($getRssData)['results'][0]->feedUrl;
 
-                $rss_feed = self::tracked_remote_get($rss_url, [
+                $rssFeed = self::trackedRemoteGet($rssUrl, [
                     'playlist_name' => $context['playlist_name'] ?? '',
                     'type' => $context['type'] ?? 'podcast',
                     'endpoint' => 'podcast_rss',
                 ]);
             } else {
-                $rss_url = $rss_feed_input;
-                $rss_feed = self::tracked_remote_get($rss_url, [
+                $rssUrl  = $rssFeedInput;
+                $rssFeed = self::trackedRemoteGet($rssUrl, [
                     'playlist_name' => $context['playlist_name'] ?? '',
                     'type' => $context['type'] ?? 'podcast',
                     'endpoint' => 'podcast_rss',
                 ]);
             }
 
-            if (is_wp_error($rss_feed) || wp_remote_retrieve_response_code($rss_feed) !== 200) {
+            if (is_wp_error($rssFeed) || wp_remote_retrieve_response_code($rssFeed) !== 200) {
                 return null;
             }
 
-            $rss_body = wp_remote_retrieve_body($rss_feed);
-            if ($rss_body === '') {
+            $rssBody = wp_remote_retrieve_body($rssFeed);
+            if ($rssBody === '') {
                 return null;
             }
 
-            $parsed_rss_feed = simplexml_load_string($rss_body);
-            if (!$parsed_rss_feed) {
+            $parsedRssFeed = simplexml_load_string($rssBody);
+            if (!$parsedRssFeed) {
                 return null;
             }
 
-            $parsed_rss_feed->channel->rssUrl = $rss_url;
-            $parsed_rss_feed->channel->collectionViewUrl = $apple_data && !empty(get_object_vars($get_rss_data)['results'][0]->collectionViewUrl)
-                ? get_object_vars($get_rss_data)['results'][0]->collectionViewUrl
-                : $rss_url;
+            $parsedRssFeed->channel->rssUrl = $rssUrl;
+            $parsedRssFeed->channel->collectionViewUrl = $appleData && !empty(get_object_vars($getRssData)['results'][0]->collectionViewUrl)
+                ? get_object_vars($getRssData)['results'][0]->collectionViewUrl
+                : $rssUrl;
 
-            foreach ($parsed_rss_feed->channel->item as $item) {
-                $description_text = strip_tags($item->description);
-                $item->description = strip_tags($description_text);
-                $title_text = strip_tags($item->title);
-                $item->title = $title_text;
+            foreach ($parsedRssFeed->channel->item as $item) {
+                $descriptionText   = strip_tags($item->description);
+                $item->description = strip_tags($descriptionText);
+                $titleText         = strip_tags($item->title);
+                $item->title       = $titleText;
             }
 
-            return $parsed_rss_feed;
+            return $parsedRssFeed;
         }
 
         return null;
@@ -209,52 +209,52 @@ final class MediaContent
     /**
      * Returns the absolute backup file path for a podcast playlist.
      *
-     * The file name follows the pattern `{playlist_name}_podcast_backup_data.json`
+     * The file name follows the pattern `{playlistName}_podcast_backup_data.json`
      * within the plugin's backup directory.
      *
-     * @param string $playlist_name The playlist_name slug.
+     * @param string $playlistName The playlist_name slug.
      * @return string Absolute file path.
      */
-    private static function podcast_backup_file_path(string $playlist_name): string
+    private static function podcastBackupFilePath(string $playlistName): string
     {
-        return self::backup_dir() . $playlist_name . '_podcast_backup_data.json';
+        return self::backupDir() . $playlistName . '_podcast_backup_data.json';
     }
 
     /**
      * Main entry point: loads media data and emits initialization scripts.
      *
      * Builds the resolved config from `$params` plus stored TTL settings, then:
-     * 1. When the cookie is expired, calls {@see self::load_media_data_when_cookie_expired()}
+     * 1. When the cookie is expired, calls {@see self::loadMediaDataWhenCookieExpired()}
      *    to populate $state with fresh data (from cache or API).
      * 2. If an abort flag was set (e.g. malformed YouTube response), returns early.
-     * 3. Calls {@see self::render_media_data_status_scripts()} to emit localStorage
+     * 3. Calls {@see self::renderMediaDataStatusScripts()} to emit localStorage
      *    update scripts or error/fallback scripts.
-     * 4. Calls {@see self::render_media_initialization_script()} to emit the
+     * 4. Calls {@see self::renderMediaInitializationScript()} to emit the
      *    window.initialize_media() call script.
      *
      * @param array<string,mixed> $params Media item config from MediaBootstrap.
      * @return void
      */
-    public static function get_media_content(array $params): void
+    public static function getMediaContent(array $params): void
     {
-        $config = self::build_media_config($params);
+        $config = self::buildMediaConfig($params);
         $state = [
-            'parsed_data' => [],
-            'error_loading_data' => false,
-            'data_loaded_method' => 'API',
-            'abort' => false,
+            'parsedData'       => [],
+            'errorLoadingData' => false,
+            'dataLoadedMethod' => 'API',
+            'abort'            => false,
         ];
 
         if ($config['cookie_expired']) {
-            self::load_media_data_when_cookie_expired($config, $state);
+            self::loadMediaDataWhenCookieExpired($config, $state);
         }
 
         if ($state['abort']) {
             return;
         }
 
-        self::render_media_data_status_scripts($config, $state);
-        self::render_media_initialization_script($config);
+        self::renderMediaDataStatusScripts($config, $state);
+        self::renderMediaInitializationScript($config);
     }
 
     /**
@@ -264,10 +264,10 @@ final class MediaContent
      * from {@see Options::getCacheExpirations()} so downstream methods have a
      * single flat array with all values they need.
      *
-     * @param array<string,mixed> $params Raw params from {@see get_media_content()}.
+     * @param array<string,mixed> $params Raw params from {@see getMediaContent()}.
      * @return array<string,mixed> Resolved config including all TTL values.
      */
-    private static function build_media_config(array $params): array
+    private static function buildMediaConfig(array $params): array
     {
         $cacheExpirations = Options::getCacheExpirations();
 
@@ -292,37 +292,37 @@ final class MediaContent
      * Checks the transient cache and calls the appropriate API loader if the cache is empty.
      *
      * Reads the `{type}_{playlist_name}` transient. If found, populates
-     * $state['parsed_data'] and sets the loaded method to 'server cache'. If
-     * not found, delegates to {@see self::load_youtube_data()} or
-     * {@see self::load_podcast_data()} depending on the media type.
+     * $state['parsedData'] and sets the loaded method to 'server cache'. If
+     * not found, delegates to {@see self::loadYoutubeData()} or
+     * {@see self::loadPodcastData()} depending on the media type.
      *
      * @param array<string,mixed> $config Resolved media config array.
      * @param array<string,mixed> &$state Mutable state passed through the pipeline.
      * @return void
      */
-    private static function load_media_data_when_cookie_expired(array $config, array &$state): void
+    private static function loadMediaDataWhenCookieExpired(array $config, array &$state): void
     {
-        $type = $config['type'];
-        $playlist_name = $config['playlist_name'];
+        $type         = $config['type'];
+        $playlistName = $config['playlist_name'];
 
         // Check if data is stored in Cache in Wordpress Transients
-        $cached_data = get_transient($type . '_' . $playlist_name);
+        $cachedData = get_transient($type . '_' . $playlistName);
 
-        if ($cached_data !== false) {
+        if ($cachedData !== false) {
             if ($type === 'podcast') {
-                $state['parsed_data'] = json_decode($cached_data, true);
+                $state['parsedData'] = json_decode($cachedData, true);
             } else {
-                $state['parsed_data'] = $cached_data;
+                $state['parsedData'] = $cachedData;
             }
-            $state['data_loaded_method'] = 'server cache';
+            $state['dataLoadedMethod'] = 'server cache';
         }
 
-        if ($type === 'youtube' && $cached_data === false) {
-            self::load_youtube_data($config, $state);
+        if ($type === 'youtube' && $cachedData === false) {
+            self::loadYoutubeData($config, $state);
         }
 
-        if ($type === 'podcast' && $cached_data === false) {
-            self::load_podcast_data($config, $state);
+        if ($type === 'podcast' && $cachedData === false) {
+            self::loadPodcastData($config, $state);
         }
     }
 
@@ -343,112 +343,112 @@ final class MediaContent
      * wp_options timestamp record. Clears error and in-progress transients on success.
      *
      * @param array<string,mixed> $config Resolved media config array.
-     * @param array<string,mixed> &$state Mutable state. Sets 'parsed_data', 'error_loading_data', or 'abort'.
+     * @param array<string,mixed> &$state Mutable state. Sets 'parsedData', 'errorLoadingData', or 'abort'.
      * @return void
      */
-    private static function load_youtube_data(array $config, array &$state): void
+    private static function loadYoutubeData(array $config, array &$state): void
     {
-        $type = $config['type'];
-        $playlist_name = $config['playlist_name'];
-        $api_key = $config['api_key'];
-        $media_data = $config['media_data'];
-        $sort_mode = $config['sort_mode'];
-        $load_full_playlist = $config['load_full_playlist'];
-        $media_cache_ttl = (int) $config['media_cache_ttl'];
-        $youtube_request_in_progress_ttl = (int) $config['youtube_request_in_progress_ttl'];
-        $youtube_backup_window_seconds = (int) $config['youtube_backup_window_seconds'];
+        $type                          = $config['type'];
+        $playlistName                  = $config['playlist_name'];
+        $apiKey                        = $config['api_key'];
+        $mediaData                     = $config['media_data'];
+        $sortMode                      = $config['sort_mode'];
+        $loadFullPlaylist              = $config['load_full_playlist'];
+        $mediaCacheTtl                 = (int) $config['media_cache_ttl'];
+        $youtubeRequestInProgressTtl   = (int) $config['youtube_request_in_progress_ttl'];
+        $youtubeBackupWindowSeconds    = (int) $config['youtube_backup_window_seconds'];
 
-        $previous_youtube_error = get_transient($playlist_name . '_youtube_error');
-        $last_fetched_option_key = 'maw_yt_last_fetched_' . sanitize_key((string) $playlist_name);
-        $last_fetched_at = (int) get_option($last_fetched_option_key, 0);
-        $fetch_interval_seconds = $youtube_backup_window_seconds;
+        $previousYoutubeError  = get_transient($playlistName . '_youtube_error');
+        $lastFetchedOptionKey  = 'maw_yt_last_fetched_' . sanitize_key((string) $playlistName);
+        $lastFetchedAt         = (int) get_option($lastFetchedOptionKey, 0);
+        $fetchIntervalSeconds  = $youtubeBackupWindowSeconds;
 
-        if ($last_fetched_at > 0 && (time() - $last_fetched_at) < $fetch_interval_seconds) {
-            $youtube_backup_file_path = self::backup_dir() . $playlist_name . '_youtube_backup_data.json';
+        if ($lastFetchedAt > 0 && (time() - $lastFetchedAt) < $fetchIntervalSeconds) {
+            $youtubeBackupFilePath = self::backupDir() . $playlistName . '_youtube_backup_data.json';
 
-            if (file_exists($youtube_backup_file_path) && is_readable($youtube_backup_file_path)) {
-                $parsed_backup_data = json_decode(file_get_contents($youtube_backup_file_path), true);
-                if (!empty($parsed_backup_data['data']) && is_array($parsed_backup_data['data'])) {
-                    $state['parsed_data'] = $parsed_backup_data['data'];
-                    $state['data_loaded_method'] = 'backup cache (rate limit)';
-                    $state['error_loading_data'] = true;
+            if (file_exists($youtubeBackupFilePath) && is_readable($youtubeBackupFilePath)) {
+                $parsedBackupData = json_decode(file_get_contents($youtubeBackupFilePath), true);
+                if (!empty($parsedBackupData['data']) && is_array($parsedBackupData['data'])) {
+                    $state['parsedData']       = $parsedBackupData['data'];
+                    $state['dataLoadedMethod'] = 'backup cache (rate limit)';
+                    $state['errorLoadingData'] = true;
                 }
             } else {
-                $state['error_loading_data'] = true;
+                $state['errorLoadingData'] = true;
             }
             return;
         }
 
-        if ($previous_youtube_error || get_transient($playlist_name . '_youtube_request_in_progress')) {
-            $state['error_loading_data'] = true;
+        if ($previousYoutubeError || get_transient($playlistName . '_youtube_request_in_progress')) {
+            $state['errorLoadingData'] = true;
             return;
         }
 
-        $youtube_req_url = 'https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=' . $media_data . '&key=' . $api_key . '&maxResults=50';
-        set_transient($playlist_name . '_youtube_request_in_progress', true, $youtube_request_in_progress_ttl);
+        $youtubeReqUrl = 'https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=' . $mediaData . '&key=' . $apiKey . '&maxResults=50';
+        set_transient($playlistName . '_youtube_request_in_progress', true, $youtubeRequestInProgressTtl);
 
-        $youtube_get_req = self::tracked_remote_get($youtube_req_url, [
-            'playlist_name' => $playlist_name,
+        $youtubeGetReq = self::trackedRemoteGet($youtubeReqUrl, [
+            'playlist_name' => $playlistName,
             'type' => $type,
             'endpoint' => 'youtube_playlist_items',
         ]);
 
-        if (is_wp_error($youtube_get_req) || wp_remote_retrieve_response_code($youtube_get_req) !== 200) {
-            $state['error_loading_data'] = true;
+        if (is_wp_error($youtubeGetReq) || wp_remote_retrieve_response_code($youtubeGetReq) !== 200) {
+            $state['errorLoadingData'] = true;
             return;
         }
 
-        $youtube_data = json_decode(wp_remote_retrieve_body($youtube_get_req), true);
-        $youtube_items = $youtube_data['items'];
-        $youtube_items_tally = count($youtube_data['items']);
-        $nextPageToken = $youtube_data['nextPageToken'] ?? null;
+        $youtubeData        = json_decode(wp_remote_retrieve_body($youtubeGetReq), true);
+        $youtubeItems       = $youtubeData['items'];
+        $youtubeItemsTally  = count($youtubeData['items']);
+        $nextPageToken      = $youtubeData['nextPageToken'] ?? null;
 
         // Youtube Has A Limit Of 50 Results Per Request. If Playlist Item Total Is Greater Than 50, Then A While Loop Runs Until Total Items Received Equals Total Results
-        while ($youtube_data['pageInfo']['totalResults'] > $youtube_items_tally) {
-            $youtube_loop = self::tracked_remote_get($youtube_req_url . '&pageToken=' . $nextPageToken, [
-                'playlist_name' => $playlist_name,
+        while ($youtubeData['pageInfo']['totalResults'] > $youtubeItemsTally) {
+            $youtubeLoop = self::trackedRemoteGet($youtubeReqUrl . '&pageToken=' . $nextPageToken, [
+                'playlist_name' => $playlistName,
                 'type' => $type,
                 'endpoint' => 'youtube_playlist_items',
             ]);
-            if (is_wp_error($youtube_loop) || wp_remote_retrieve_response_code($youtube_loop) !== 200) {
-                $state['error_loading_data'] = true;
+            if (is_wp_error($youtubeLoop) || wp_remote_retrieve_response_code($youtubeLoop) !== 200) {
+                $state['errorLoadingData'] = true;
                 break;
             }
-            $youtube_loop = json_decode(wp_remote_retrieve_body($youtube_loop), true);
-            $youtube_items_tally += count($youtube_loop['items']);
-            $youtube_items = array_merge($youtube_items, $youtube_loop['items']);
-            $nextPageToken = $youtube_loop['nextPageToken'] ?? null;
+            $youtubeLoop        = json_decode(wp_remote_retrieve_body($youtubeLoop), true);
+            $youtubeItemsTally += count($youtubeLoop['items']);
+            $youtubeItems       = array_merge($youtubeItems, $youtubeLoop['items']);
+            $nextPageToken      = $youtubeLoop['nextPageToken'] ?? null;
             if (!$nextPageToken) {
                 break;
             }
         }
 
         // Combine All Youtube Video Items Together From While Loop If Looped Through
-        $youtube_data['items'] = $youtube_items;
+        $youtubeData['items'] = $youtubeItems;
 
         // Used to check if episode number already retrieved
-        $youtube_episode_number_collected = [];
+        $youtubeEpisodeNumberCollected = [];
 
         // Loop Through Video Items And Parse Accordingly
-        foreach ($youtube_data['items'] as $item) {
+        foreach ($youtubeData['items'] as $item) {
             $itemOutput = [];
             if ($item) {
                 if ($item['snippet']) {
                     $snippet = $item['snippet'];
                     if ($snippet['title'] !== '') {
-                        if ($sort_mode === 'number_in_title') {
-                            $episode_number = self::episode_number_generator($snippet['title']);
-                            if (in_array($episode_number, $youtube_episode_number_collected)) {
+                        if ($sortMode === 'number_in_title') {
+                            $episodeNumber = self::episodeNumberGenerator($snippet['title']);
+                            if (in_array($episodeNumber, $youtubeEpisodeNumberCollected)) {
                                 continue;
                             }
-                            $itemOutput['episode'] = $episode_number;
-                            array_push($youtube_episode_number_collected, $episode_number);
+                            $itemOutput['episode'] = $episodeNumber;
+                            array_push($youtubeEpisodeNumberCollected, $episodeNumber);
                         } else {
                             $itemOutput['episode'] = -1;
                         }
                         $itemOutput['title'] = $snippet['title'];
                     } else {
-                        $itemOutput['title'] = null;
+                        $itemOutput['title']   = null;
                         $itemOutput['episode'] = -1;
                     }
                     if ($snippet['resourceId'] && $snippet['resourceId']['videoId']) {
@@ -491,59 +491,59 @@ final class MediaContent
             }
 
             if ($itemOutput['thumbnail'] !== null) {
-                array_push($state['parsed_data'], $itemOutput);
+                array_push($state['parsedData'], $itemOutput);
             }
         }
 
-        // If $sort_mode Was Set To "number_in_title", Sort List Based Upon Episode Number Generated
-        if ($sort_mode === 'number_in_title') {
-            $key_values = array_column($state['parsed_data'], 'episode');
-            array_multisort($key_values, SORT_DESC, $state['parsed_data']);
+        // If $sortMode Was Set To "number_in_title", Sort List Based Upon Episode Number Generated
+        if ($sortMode === 'number_in_title') {
+            $keyValues = array_column($state['parsedData'], 'episode');
+            array_multisort($keyValues, SORT_DESC, $state['parsedData']);
         }
 
         // Checks to make sure there aren't any Items with the same title. If so, it is removed
-        $pre_duplicate_removal = $state['parsed_data'];
+        $preDuplicateRemoval = $state['parsedData'];
 
-        foreach ($pre_duplicate_removal as $index => $video) {
-            if (isset($video['title']) && isset($pre_duplicate_removal[$index + 1]['title']) && $index + 1 < count($pre_duplicate_removal)) {
-                if ($video['title'] === $pre_duplicate_removal[$index + 1]['title']) {
-                    unset($pre_duplicate_removal[$index + 1]);
+        foreach ($preDuplicateRemoval as $index => $video) {
+            if (isset($video['title']) && isset($preDuplicateRemoval[$index + 1]['title']) && $index + 1 < count($preDuplicateRemoval)) {
+                if ($video['title'] === $preDuplicateRemoval[$index + 1]['title']) {
+                    unset($preDuplicateRemoval[$index + 1]);
                 }
             }
         }
 
-        // If $load_full_playlist is not set to true, remove all items after index of 5 from array, limiting list to 6 items
-        $youtube_list_output = $pre_duplicate_removal;
+        // If $loadFullPlaylist is not set to true, remove all items after index of 5 from array, limiting list to 6 items
+        $youtubeListOutput = $preDuplicateRemoval;
 
-        if ($load_full_playlist !== true) {
-            foreach ($youtube_list_output as $index => $video) {
+        if ($loadFullPlaylist !== true) {
+            foreach ($youtubeListOutput as $index => $video) {
                 if ($index > 5) {
-                    unset($youtube_list_output[$index]);
+                    unset($youtubeListOutput[$index]);
                 }
             }
         }
-        $state['parsed_data'] = array_values($youtube_list_output);
+        $state['parsedData'] = array_values($youtubeListOutput);
 
         // Check backup youtube stored data to see if it is older than 6 hours. If so, update youtube data backup file
-        $backup_data = json_encode([
+        $backupData = json_encode([
             'time_stored' => time(),
-            'data' => $state['parsed_data'],
+            'data' => $state['parsedData'],
         ]);
 
-        $youtube_backup_file_path = self::backup_dir() . $playlist_name . '_youtube_backup_data.json';
-        file_put_contents($youtube_backup_file_path, $backup_data);
+        $youtubeBackupFilePath = self::backupDir() . $playlistName . '_youtube_backup_data.json';
+        file_put_contents($youtubeBackupFilePath, $backupData);
 
         // Set parsed data to Wordpress transient server cache
-        set_transient($type . '_' . $playlist_name, $state['parsed_data'], $media_cache_ttl);
+        set_transient($type . '_' . $playlistName, $state['parsedData'], $mediaCacheTtl);
 
         // Clear Youtube API Error Transient If Data Successfully Retrieved
-        delete_transient($playlist_name . '_youtube_error');
+        delete_transient($playlistName . '_youtube_error');
 
         // Clear Youtube API Request In Progress Transient If Data Successfully Retrieved
-        delete_transient($playlist_name . '_youtube_request_in_progress');
+        delete_transient($playlistName . '_youtube_request_in_progress');
 
         // Persist successful fetch timestamp so rate limiting does not rely on transient durability.
-        update_option($last_fetched_option_key, time(), false);
+        update_option($lastFetchedOptionKey, time(), false);
     }
 
     /**
@@ -552,78 +552,78 @@ final class MediaContent
      * Platform dispatch:
      * - 'omny', 'soundcloud', 'buzzsprout', 'other' — looks up the RSS feed URL
      *   via the iTunes API (using the numeric Apple podcast ID in media_data),
-     *   then fetches and parses the RSS feed through {@see self::parse_rss_feed()}.
-     * - 'embed' — stores the embed URL string directly as parsed_data; no RSS
+     *   then fetches and parses the RSS feed through {@see self::parseRssFeed()}.
+     * - 'embed' — stores the embed URL string directly as parsedData; no RSS
      *   fetch is performed.
      * - 'custom' — treats media_data as a direct RSS URL, parses it, writes a
      *   backup JSON file, and stores the result in the transient.
      *
-     * On success, JSON-encodes parsed_data and writes it to the transient for
+     * On success, JSON-encodes parsedData and writes it to the transient for
      * `media_cache_ttl` seconds.
      *
      * @param array<string,mixed> $config Resolved media config array.
-     * @param array<string,mixed> &$state Mutable state. Sets 'parsed_data' and 'error_loading_data'.
+     * @param array<string,mixed> &$state Mutable state. Sets 'parsedData' and 'errorLoadingData'.
      * @return void
      */
-    private static function load_podcast_data(array $config, array &$state): void
+    private static function loadPodcastData(array $config, array &$state): void
     {
-        $type = $config['type'];
-        $podcast_platform = $config['podcast_platform'];
-        $playlist_name = $config['playlist_name'];
-        $media_data = $config['media_data'];
-        $media_cache_ttl = (int) $config['media_cache_ttl'];
+        $type            = $config['type'];
+        $podcastPlatform = $config['podcast_platform'];
+        $playlistName    = $config['playlist_name'];
+        $mediaData       = $config['media_data'];
+        $mediaCacheTtl   = (int) $config['media_cache_ttl'];
 
-        $get_rss = null;
+        $getRss = null;
 
-        if ($podcast_platform !== 'embed' && $podcast_platform !== 'custom') {
-            if ($podcast_platform === 'omny' || $podcast_platform === 'soundcloud' || $podcast_platform === 'buzzsprout' || $podcast_platform === 'other') {
-                $get_rss = self::tracked_remote_get('https://itunes.apple.com/lookup?id=' . $media_data . '&entity=podcast', [
-                    'playlist_name' => $playlist_name,
+        if ($podcastPlatform !== 'embed' && $podcastPlatform !== 'custom') {
+            if ($podcastPlatform === 'omny' || $podcastPlatform === 'soundcloud' || $podcastPlatform === 'buzzsprout' || $podcastPlatform === 'other') {
+                $getRss = self::trackedRemoteGet('https://itunes.apple.com/lookup?id=' . $mediaData . '&entity=podcast', [
+                    'playlist_name' => $playlistName,
                     'type' => $type,
                     'endpoint' => 'podcast_lookup',
                 ]);
             }
 
-            if (!$get_rss && $podcast_platform !== 'custom') {
-                $state['error_loading_data'] = true;
+            if (!$getRss && $podcastPlatform !== 'custom') {
+                $state['errorLoadingData'] = true;
             } else {
-                $is_apple_rss = $podcast_platform !== 'custom';
-                $state['parsed_data'] = self::parse_rss_feed($get_rss, $is_apple_rss, [
-                    'playlist_name' => $playlist_name,
+                $isAppleRss          = $podcastPlatform !== 'custom';
+                $state['parsedData'] = self::parseRssFeed($getRss, $isAppleRss, [
+                    'playlist_name' => $playlistName,
                     'type' => $type,
                 ]);
-                if (!$state['parsed_data']) {
-                    $state['error_loading_data'] = true;
+                if (!$state['parsedData']) {
+                    $state['errorLoadingData'] = true;
                 }
             }
         } else {
             // Embed Podcast Url Without Direct RSS Feed
-            if ($podcast_platform === 'embed') {
-                $state['parsed_data'] = $media_data;
+            if ($podcastPlatform === 'embed') {
+                $state['parsedData'] = $mediaData;
             }
 
             // Direct RSS Feed Url
-            if ($podcast_platform === 'custom') {
-                $state['parsed_data'] = self::parse_rss_feed($media_data, false, [
-                    'playlist_name' => $playlist_name,
+            if ($podcastPlatform === 'custom') {
+                $state['parsedData'] = self::parseRssFeed($mediaData, false, [
+                    'playlist_name' => $playlistName,
                     'type' => $type,
                 ]);
-                if ($state['parsed_data']) {
-                    $state['parsed_data']->channel->rssUrl = $media_data;
-                    $backup_data = json_encode([
+                if ($state['parsedData']) {
+                    $state['parsedData']->channel->rssUrl = $mediaData;
+                    $backupData = json_encode([
                         'time_stored' => time(),
-                        'data' => $state['parsed_data'],
+                        'data' => $state['parsedData'],
                     ]);
-                    file_put_contents(self::podcast_backup_file_path($playlist_name), $backup_data);
+                    file_put_contents(self::podcastBackupFilePath($playlistName), $backupData);
                 } else {
-                    $state['error_loading_data'] = true;
+                    $state['errorLoadingData'] = true;
                 }
             }
         }
 
         // Set parsed data to Wordpress transient server cache
-        if (!$state['error_loading_data']) {
-            set_transient($type . '_' . $playlist_name, json_encode($state['parsed_data']), $media_cache_ttl);
+        if (!$state['errorLoadingData']) {
+            set_transient($type . '_' . $playlistName, json_encode($state['parsedData']), $mediaCacheTtl);
         }
     }
 
@@ -644,76 +644,76 @@ final class MediaContent
      * @param array<string,mixed> $state  Finalized state after data loading.
      * @return void
      */
-    private static function render_media_data_status_scripts(array $config, array $state): void
+    private static function renderMediaDataStatusScripts(array $config, array $state): void
     {
-        $type = $config['type'];
-        $playlist_name = $config['playlist_name'];
-        $cookie_name = $config['cookie_name'];
-        $cookie_expired = $config['cookie_expired'];
-        $parsed_data = $state['parsed_data'];
-        $error_loading_data = $state['error_loading_data'];
-        $data_loaded_method = $state['data_loaded_method'];
-        $youtube_error_ttl = (int) $config['youtube_error_ttl'];
+        $type             = $config['type'];
+        $playlistName     = $config['playlist_name'];
+        $cookieName       = $config['cookie_name'];
+        $cookieExpired    = $config['cookie_expired'];
+        $parsedData       = $state['parsedData'];
+        $errorLoadingData = $state['errorLoadingData'];
+        $dataLoadedMethod = $state['dataLoadedMethod'];
+        $youtubeErrorTtl  = (int) $config['youtube_error_ttl'];
 
         // Log If There Was An Error Getting The Data And Clear Cookie
-        if ($error_loading_data) {
-            if ($type === 'youtube' && !get_transient($playlist_name . '_youtube_error')) {
-                set_transient($playlist_name . '_youtube_error', true, $youtube_error_ttl);
+        if ($errorLoadingData) {
+            if ($type === 'youtube' && !get_transient($playlistName . '_youtube_error')) {
+                set_transient($playlistName . '_youtube_error', true, $youtubeErrorTtl);
             }
-            if ($type === 'youtube' && get_transient($playlist_name . '_youtube_request_in_progress')) {
+            if ($type === 'youtube' && get_transient($playlistName . '_youtube_request_in_progress')) {
                 echo '<script>console.warn("A previous request for YouTube data is still in progress.  This may be the reason for the error in loading the data.  Please wait a moment and try reloading the page.")</script>';
             }
             echo '<script>
-                    console.error("There was an error getting the ' . $playlist_name . '_' . $type . '_playlist data.  Check your internet connection, try reloading or check the API key/media data.");
+                    console.error("There was an error getting the ' . $playlistName . '_' . $type . '_playlist data.  Check your internet connection, try reloading or check the API key/media data.");
                 </script>';
-            if ($cookie_name) {
+            if ($cookieName) {
                 echo '<script>
-                    document.cookie = "' . $cookie_name . '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+                    document.cookie = "' . $cookieName . '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
                 </script>';
             }
 
             // Load backup server data if type is youtube
             if ($type === 'youtube') {
-                $youtube_backup_file_path = self::backup_dir() . $playlist_name . '_youtube_backup_data.json';
+                $youtubeBackupFilePath = self::backupDir() . $playlistName . '_youtube_backup_data.json';
 
-                if (file_exists($youtube_backup_file_path) && is_readable($youtube_backup_file_path)) {
-                    $parsed_backup_data = json_decode(file_get_contents($youtube_backup_file_path), true);
-                    if (!empty($parsed_backup_data['data'])) {
-                        echo '<script>localStorage.setItem("' . $playlist_name . '_' . $type . '_playlist", JSON.stringify(' . json_encode($parsed_backup_data['data']) . ')); console.log("`' . $playlist_name . '` ' . $type . ' data loaded from Backup storage and saved on Local Storage as `' . $playlist_name . '_' . $type . '_playlist.` as there was an error when making a call to the youtube API.");</script>';
+                if (file_exists($youtubeBackupFilePath) && is_readable($youtubeBackupFilePath)) {
+                    $parsedBackupData = json_decode(file_get_contents($youtubeBackupFilePath), true);
+                    if (!empty($parsedBackupData['data'])) {
+                        echo '<script>localStorage.setItem("' . $playlistName . '_' . $type . '_playlist", JSON.stringify(' . json_encode($parsedBackupData['data']) . ')); console.log("`' . $playlistName . '` ' . $type . ' data loaded from Backup storage and saved on Local Storage as `' . $playlistName . '_' . $type . '_playlist.` as there was an error when making a call to the youtube API.");</script>';
                     }
                 }
             }
 
             if ($type === 'podcast') {
-                $podcast_backup_file_path = self::podcast_backup_file_path($playlist_name);
+                $podcastBackupFilePath = self::podcastBackupFilePath($playlistName);
 
-                if (file_exists($podcast_backup_file_path) && is_readable($podcast_backup_file_path)) {
-                    $parsed_backup_data = json_decode(file_get_contents($podcast_backup_file_path), true);
-                    if (!empty($parsed_backup_data['data'])) {
-                        echo '<script>localStorage.setItem("' . $playlist_name . '_' . $type . '_playlist", JSON.stringify(' . json_encode($parsed_backup_data['data']) . ')); console.log("`' . $playlist_name . '` ' . $type . ' data loaded from Backup storage and saved on Local Storage as `' . $playlist_name . '_' . $type . '_playlist.` as there was an error when making a call to the podcast RSS feed.");</script>';
+                if (file_exists($podcastBackupFilePath) && is_readable($podcastBackupFilePath)) {
+                    $parsedBackupData = json_decode(file_get_contents($podcastBackupFilePath), true);
+                    if (!empty($parsedBackupData['data'])) {
+                        echo '<script>localStorage.setItem("' . $playlistName . '_' . $type . '_playlist", JSON.stringify(' . json_encode($parsedBackupData['data']) . ')); console.log("`' . $playlistName . '` ' . $type . ' data loaded from Backup storage and saved on Local Storage as `' . $playlistName . '_' . $type . '_playlist.` as there was an error when making a call to the podcast RSS feed.");</script>';
                     }
                 }
             }
         }
 
         // Data Stored In Local Storage If Cookie Expired And API Call Was Made With No Errors
-        if ($cookie_expired && !$error_loading_data) {
+        if ($cookieExpired && !$errorLoadingData) {
             // Set Cookie Storage Time Stamp And Output Parsed data Into Browser Local Storage
-            echo '<script>localStorage.setItem("' . $playlist_name . '_' . $type . '_playlist", JSON.stringify(' . json_encode($parsed_data) . ')); console.log("`' . $playlist_name . '` ' . $type . ' data loaded from ' . $data_loaded_method . ' and saved on Local Storage as `' . $playlist_name . '_' . $type . '_playlist.`.");</script>';
+            echo '<script>localStorage.setItem("' . $playlistName . '_' . $type . '_playlist", JSON.stringify(' . json_encode($parsedData) . ')); console.log("`' . $playlistName . '` ' . $type . ' data loaded from ' . $dataLoadedMethod . ' and saved on Local Storage as `' . $playlistName . '_' . $type . '_playlist.`.");</script>';
         }
 
         // Data Loaded From Local Storage Due To An Error On API Call With Cookie Expired
-        if ($cookie_expired && $error_loading_data) {
+        if ($cookieExpired && $errorLoadingData) {
             echo '<script>
-                    console.log("`' . $playlist_name . '` ' . $type . ' data loaded from Local Storage as there was an error loading the data.  Try checking your internet connection and reload the page.");
+                    console.log("`' . $playlistName . '` ' . $type . ' data loaded from Local Storage as there was an error loading the data.  Try checking your internet connection and reload the page.");
                 </script>
             ';
         }
 
         // Data Loaded From Local Storage If Cookie Did Not Expire
-        if (!$cookie_expired) {
+        if (!$cookieExpired) {
             echo '<script>
-                    console.log("`' . $playlist_name . '` ' . $type . ' data loaded from Local Storage as cookie storage time interval has not yet passed.");
+                    console.log("`' . $playlistName . '` ' . $type . ' data loaded from Local Storage as cookie storage time interval has not yet passed.");
                 </script>
             ';
         }
@@ -736,55 +736,53 @@ final class MediaContent
      * @param array<string,mixed> $config Resolved media config array.
      * @return void
      */
-    private static function render_media_initialization_script(array $config): void
+    private static function renderMediaInitializationScript(array $config): void
     {
-        $type = $config['type'];
-        $podcast_platform = $config['podcast_platform'];
-        $playlist_name = $config['playlist_name'];
-        $cookie_name = $config['cookie_name'];
+        $type            = $config['type'];
+        $podcastPlatform = $config['podcast_platform'];
+        $playlistName    = $config['playlist_name'];
+        $cookieName      = $config['cookie_name'];
+        ?>
 
-        // INDIVIDUAL MEDIA TYPE INITIALIZATION
-        echo '
+        <!-- Media API "<?= $playlistName ?>_<?= $type ?>" Code Start -->
 
-            <!-- Media API "' . $playlist_name . '_' . $type . '" Code Start -->
+        <script>
 
-            <script>
+            // Load <?= $type ?> Data From Local Storage
 
-                // Load ' . $type . ' Data From Local Storage
+            const <?= $playlistName ?>_<?= $type ?>_data = JSON.parse(localStorage.getItem("<?= $playlistName ?>_<?= $type ?>_playlist"));
 
-                const ' . $playlist_name . '_' . $type . '_data = JSON.parse(localStorage.getItem("' . $playlist_name . '_' . $type . '_playlist"));
+            // If No Data Found In Local Storage, Clear Cookie
 
-                // If No Data Found In Local Storage, Clear Cookie
+            if (!<?= $playlistName ?>_<?= $type ?>_data && "<?= $cookieName ?>") {
+                document.cookie = "<?= $cookieName ?>=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            }
 
-                if (!' . $playlist_name . '_' . $type . '_data && "' . $cookie_name . '") {
-                    document.cookie = "' . $cookie_name . '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-                }
+            // Console Error If No Data Found
 
-                // Console Error If No Data Found
+            if (!<?= $playlistName ?>_<?= $type ?>_data) {
+                console.error("No data found for `<?= $playlistName ?>_<?= $type ?>` or data in Local Storage was deleted.  Check your internet connection and reload the page.");
+            }
 
-                if (!' . $playlist_name . '_' . $type . '_data) {
-                    console.error("No data found for `' . $playlist_name . '_' . $type . '` or data in Local Storage was deleted.  Check your internet connection and reload the page.");
-                }
+            if (<?= $playlistName ?>_<?= $type ?>_data && <?= $playlistName ?>_<?= $type ?>_data.length === 0) {
+                console.error("`<?= $playlistName ?>_<?= $type ?>` data cannot be loaded.. Data is empty.");
+            }
 
-                if (' . $playlist_name . '_' . $type . '_data && ' . $playlist_name . '_' . $type . '_data.length === 0) {
-                    console.error("`' . $playlist_name . '_' . $type . '` data cannot be loaded.. Data is empty.");
-                }
+            // Initialize Media
 
-                // Initialize Media
+            window.addEventListener("load", () => {
+                const media_items = document.querySelectorAll(`[data-playlistname="<?= $playlistName ?>"]`);
 
-                window.addEventListener("load", () => {
-                    const media_items = document.querySelectorAll(`[data-playlistname="' . $playlist_name . '"]`);
+                initialize_media([...media_items].filter(item => item.dataset.mediaplatform === "<?= $type ?>" && item.dataset.playlistname === "<?= $playlistName ?>"),
+                    <?= $playlistName ?>_<?= $type ?>_data,
+                    "<?= $playlistName ?>", "<?= $type ?>",
+                    "<?= $podcastPlatform ?>"
+                );
+            });
 
-                    initialize_media([...media_items].filter(item => item.dataset.mediaplatform === "' . $type . '" && item.dataset.playlistname === "' . $playlist_name . '"),
-                        ' . $playlist_name . '_' . $type . '_data,
-                        "' . $playlist_name . '", "' . $type . '",
-                        "' . $podcast_platform . '"
-                    );
-                });
-
-            </script>
-            <!-- Media API "' . $playlist_name . '_' . $type . '" Code End -->
-        ';
+        </script>
+        <!-- Media API "<?= $playlistName ?>_<?= $type ?>" Code End -->
+        <?php
     }
 
     /**
@@ -796,7 +794,7 @@ final class MediaContent
      *
      * @return void
      */
-    public static function render_meta_data_updater_script(): void
+    public static function renderMetaDataUpdaterScript(): void
     {
         // SEO tags are now rendered server-side by MetaUpdater.
     }

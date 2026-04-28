@@ -115,7 +115,7 @@ final class AboutPage
                 <p>Shortcode fields are global <strong>key → value</strong> pairs stored in the database. You can reference them inside any shortcode attribute using <code>&#123;&#123;field_name&#125;&#125;</code> or <code>[media-api-widget field="field_name"]</code>. This lets you update a color, font, or label in one place and have it take effect everywhere.</p>
 
                 <h3>Default Shortcode Fields (Auto-Seeded)</h3>
-                <p>These eight fields are created on activation. Their <strong>field names are locked</strong> (cannot be renamed or deleted), but you can change their values freely. They drive the default styling of the podcast player across the entire site.</p>
+                <p>These ten fields are created on activation. Their <strong>field names are locked</strong> (cannot be renamed or deleted), but you can change their values freely. They drive the default styling of the podcast player and lightbox panel across the entire site.</p>
                 <table class="widefat striped maw-table maw-about-table">
                     <thead><tr><th>Field Name</th><th>Default Value</th><th>Controls</th></tr></thead>
                     <tbody>
@@ -127,6 +127,8 @@ final class AboutPage
                         <tr><td><code>podcast_player_selected_color</code></td><td><code>#7a7a7a</code></td><td>Selected episode highlight color</td></tr>
                         <tr><td><code>podcast_player_font</code></td><td><code>Roboto</code></td><td>Google Fonts font name</td></tr>
                         <tr><td><code>podcast_player_scrollbar_color</code></td><td><code>#c7c7c7</code></td><td>Scrollbar color</td></tr>
+                        <tr><td><code>lightbox_playlist_logo</code></td><td><em>(empty)</em></td><td>Logo image URL displayed in the lightbox playlist panel header</td></tr>
+                        <tr><td><code>lightbox_playlist_border_color</code></td><td><code>#ffffff</code></td><td>Border / theme color of the lightbox playlist panel</td></tr>
                     </tbody>
                 </table>
 

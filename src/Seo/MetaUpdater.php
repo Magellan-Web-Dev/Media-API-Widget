@@ -228,7 +228,7 @@ final class MetaUpdater
         }
 
         if ($mediaType === 'youtube') {
-            $path = MediaContent::backup_dir() . $playlistName . '_youtube_backup_data.json';
+            $path = MediaContent::backupDir() . $playlistName . '_youtube_backup_data.json';
             if (is_readable($path)) {
                 $backup = json_decode((string) file_get_contents($path), true);
                 if (is_array($backup) && isset($backup['data']) && is_array($backup['data'])) {
@@ -238,7 +238,7 @@ final class MetaUpdater
         }
 
         if ($mediaType === 'podcast') {
-            $path = MediaContent::backup_dir() . $playlistName . '_podcast_backup_data.json';
+            $path = MediaContent::backupDir() . $playlistName . '_podcast_backup_data.json';
             if (is_readable($path)) {
                 $backup = json_decode((string) file_get_contents($path), true);
                 if (is_array($backup) && isset($backup['data']) && is_array($backup['data'])) {
