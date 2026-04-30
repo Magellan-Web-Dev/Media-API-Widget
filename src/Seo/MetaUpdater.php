@@ -7,13 +7,14 @@ use MediaApiWidget\Frontend\MediaContent;
 if (!defined('ABSPATH')) { exit; }
 
 /**
- * Injects server-rendered Open Graph and Twitter Card meta tags into wp_head.
+ * Injects SEO meta tags, canonical/alternate links, and JSON-LD into wp_head.
  *
  * On each front-end page load, scans the current post's content for
  * [media-api-widget-render], [media-api-widget-item], and
  * [media-api-podcast-player] shortcodes, resolves the first usable media item
- * from the transient cache (or backup JSON), and emits a complete set of
- * og:/twitter: meta tags before WordPress closes the <head>.
+ * from the transient cache (or backup JSON), and emits description, og:*,
+ * twitter:*, canonical, RSS alternate, and JSON-LD structured data before
+ * WordPress closes the <head>.
  *
  * Runs at wp_head priority 30, after MediaBootstrap (priority 20), so the
  * transient written on this request's cache warm-up is already available.
@@ -261,7 +262,7 @@ final class MetaUpdater
      *
      * @param array<string,mixed>|array<int,array<string,mixed>> $mediaData Raw cached data.
      * @param array<string,string>                               $context   Media context from resolveCurrentMediaContexts().
-     * @return array{items: array<int,array<string,string>>, series_title: string, series_description: string, image: string}
+     * @return array{items: array<int,array<string,string>>, series_title: string, series_description: string, image: string, rss_url: string}
      */
     private function normalizeMediaPayload($mediaData, array $context): array
     {
@@ -290,6 +291,7 @@ final class MetaUpdater
                 'series_title' => $seriesTitle,
                 'series_description' => '',
                 'image' => isset($items[0]['image']) ? (string) $items[0]['image'] : '',
+                'rss_url' => '',
             ];
         }
 
@@ -299,6 +301,7 @@ final class MetaUpdater
                 'series_title' => '',
                 'series_description' => '',
                 'image' => '',
+                'rss_url' => '',
             ];
         }
 
@@ -333,6 +336,7 @@ final class MetaUpdater
             'series_title' => $this->cleanText($channel['title'] ?? ''),
             'series_description' => $this->cleanText($channel['description'] ?? ''),
             'image' => $channelImage,
+            'rss_url' => esc_url_raw((string) ($channel['rssUrl'] ?? '')),
         ];
     }
 
@@ -455,30 +459,16 @@ final class MetaUpdater
     }
 
     /**
-     * Builds the complete HTML meta tag block for the selected item.
+     * Builds the complete SEO block for the selected item: link tags, meta tags, and JSON-LD.
      *
-     * Emits the following tags:
-     * - name="description"
-     * - property="og:type"        (video.other for YouTube, article for podcast)
-     * - property="og:title"       (item title | series title | site name)
-     * - property="og:description"
-     * - property="og:site_name"
-     * - property="og:url"         (current page permalink)
-     * - name="twitter:card"       (summary_large_image or summary)
-     * - name="twitter:title"
-     * - name="twitter:description"
-     * - property="og:image"       (when an image URL is available)
-     * - property="og:image:alt"
-     * - name="twitter:image"
-     * - name="twitter:image:alt"
-     * - property="article:published_time" (when a parseable pubDate is present)
+     * Link tags: canonical (current permalink), RSS alternate (podcasts only).
+     * Meta tags: description, og:*, twitter:*, article:published_time.
+     * JSON-LD: PodcastEpisode + PodcastSeries for podcasts, VideoObject for YouTube.
      *
-     * Returns an empty string when no non-empty tags can be generated.
-     *
-     * @param array<string,string>                                                                $selectedItem  Normalized media item.
-     * @param array{items: array<int,array<string,string>>, series_title: string, series_description: string, image: string} $payload       Full normalized payload.
-     * @param array<string,string>                                                                $context       Media context.
-     * @return string HTML meta tag block (including surrounding HTML comments), or ''.
+     * @param array<string,string>                                                                              $selectedItem Normalized media item.
+     * @param array{items: array<int,array<string,string>>, series_title: string, series_description: string, image: string, rss_url: string} $payload      Full normalized payload.
+     * @param array<string,string>                                                                              $context      Media context.
+     * @return string HTML block (including surrounding HTML comments), or ''.
      */
     private function buildMetaTags(array $selectedItem, array $payload, array $context): string
     {
@@ -494,6 +484,19 @@ final class MetaUpdater
         $image = $selectedItem['image'] !== '' ? $selectedItem['image'] : $payload['image'];
         $currentUrl = get_permalink(get_queried_object_id());
         $ogType = $context['media_type'] === 'youtube' ? 'video.other' : 'article';
+
+        $publishedDate = $selectedItem['published_date'] ?? '';
+        $timestamp = $publishedDate !== '' ? strtotime($publishedDate) : false;
+
+        $links = [];
+        if (is_string($currentUrl) && $currentUrl !== '') {
+            $links[] = '<link rel="canonical" href="' . esc_url($currentUrl) . '">';
+        }
+
+        $rssUrl = (string) ($payload['rss_url'] ?? '');
+        if ($rssUrl !== '' && $context['media_type'] === 'podcast') {
+            $links[] = '<link rel="alternate" type="application/rss+xml" title="' . esc_attr($seriesTitle) . '" href="' . esc_url($rssUrl) . '">';
+        }
 
         $tags = [];
         $tags[] = $this->renderMetaTag('name', 'description', $description);
@@ -517,18 +520,117 @@ final class MetaUpdater
             $tags[] = $this->renderMetaTag('name', 'twitter:image:alt', $itemTitle);
         }
 
-        $publishedDate = $selectedItem['published_date'] ?? '';
-        $timestamp = $publishedDate !== '' ? strtotime($publishedDate) : false;
         if ($timestamp) {
             $tags[] = $this->renderMetaTag('property', 'article:published_time', gmdate('c', $timestamp));
         }
 
+        $jsonLd = $this->buildJsonLd($selectedItem, $payload, $context, $currentUrl, $timestamp);
+
         $tags = array_values(array_filter($tags));
-        if (count($tags) === 0) {
+        if (count($tags) === 0 && count($links) === 0 && $jsonLd === '') {
             return '';
         }
 
-        return "\n<!-- Media API Widget SEO -->\n" . implode("\n", $tags) . "\n";
+        $parts = ["\n<!-- Media API Widget SEO -->"];
+        if ($links) {
+            $parts[] = implode("\n", $links);
+        }
+        if ($tags) {
+            $parts[] = implode("\n", $tags);
+        }
+        if ($jsonLd !== '') {
+            $parts[] = $jsonLd;
+        }
+        $parts[] = '';
+
+        return implode("\n", $parts);
+    }
+
+    /**
+     * Builds a JSON-LD structured data block for the selected media item.
+     *
+     * Outputs PodcastEpisode (with PodcastSeries) for podcasts, VideoObject for YouTube.
+     * Null values are stripped before encoding so incomplete data produces valid schema.
+     *
+     * @param array<string,string>  $selectedItem Normalized media item.
+     * @param array<string,mixed>   $payload      Full normalized payload.
+     * @param array<string,string>  $context      Media context.
+     * @param string|false          $currentUrl   Current page permalink or false.
+     * @param int|false             $timestamp    Unix timestamp of publish date, or false.
+     * @return string JSON-LD <script> block, or ''.
+     */
+    private function buildJsonLd(array $selectedItem, array $payload, array $context, $currentUrl, $timestamp): string
+    {
+        $itemTitle = $selectedItem['title'] !== '' ? $selectedItem['title'] : ($payload['series_title'] ?? '');
+        $description = $this->truncateText(trim($selectedItem['description'] ?? ''), 500);
+        $image = $selectedItem['image'] !== '' ? $selectedItem['image'] : ($payload['image'] ?? '');
+        $url = is_string($currentUrl) && $currentUrl !== '' ? $currentUrl : null;
+        $datePublished = $timestamp ? gmdate('Y-m-d', $timestamp) : null;
+
+        if ($context['media_type'] === 'podcast') {
+            $seriesDescription = $this->truncateText((string) ($payload['series_description'] ?? ''), 500);
+            $rssUrl = (string) ($payload['rss_url'] ?? '');
+            $seriesImage = (string) ($payload['image'] ?? '');
+
+            $schema = [
+                '@context'      => 'https://schema.org',
+                '@type'         => 'PodcastEpisode',
+                'url'           => $url,
+                'name'          => $itemTitle !== '' ? $itemTitle : null,
+                'description'   => $description !== '' ? $description : null,
+                'datePublished' => $datePublished,
+                'image'         => $image !== '' ? $image : null,
+                'partOfSeries'  => [
+                    '@type'       => 'PodcastSeries',
+                    'name'        => $payload['series_title'] !== '' ? $payload['series_title'] : null,
+                    'description' => $seriesDescription !== '' ? $seriesDescription : null,
+                    'image'       => $seriesImage !== '' ? $seriesImage : null,
+                    'webFeed'     => $rssUrl !== '' ? $rssUrl : null,
+                ],
+            ];
+        } else {
+            $schema = [
+                '@context'     => 'https://schema.org',
+                '@type'        => 'VideoObject',
+                'name'         => $itemTitle !== '' ? $itemTitle : null,
+                'description'  => $description !== '' ? $description : null,
+                'thumbnailUrl' => $image !== '' ? $image : null,
+                'uploadDate'   => $datePublished,
+                'url'          => $url,
+            ];
+        }
+
+        $schema = $this->removeNullValues($schema);
+        $json = json_encode($schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+        if ($json === false) {
+            return '';
+        }
+
+        return '<script type="application/ld+json">' . "\n" . $json . "\n" . '</script>';
+    }
+
+    /**
+     * Recursively strips null values and empty arrays from a data array.
+     *
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>
+     */
+    private function removeNullValues(array $data): array
+    {
+        $result = [];
+        foreach ($data as $key => $value) {
+            if ($value === null) {
+                continue;
+            }
+            if (is_array($value)) {
+                $value = $this->removeNullValues($value);
+                if (empty($value)) {
+                    continue;
+                }
+            }
+            $result[$key] = $value;
+        }
+        return $result;
     }
 
     /**

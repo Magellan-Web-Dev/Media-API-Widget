@@ -13,15 +13,7 @@ $base_url = MAW_PLUGIN_URL . 'assets/podcast-player';
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <?php if (!$error_loading_rss): ?>
-        <!-- Podcast SEO Data START -->
-        <meta name="Podcast" content="<?= esc_attr((string) $channel->title); ?>">
-        <meta name="<?= esc_attr((string) $channel->title); ?> Podcast" content="<?= esc_attr((string) $channel->description); ?>">
-        <?php foreach($episodes as $episode): ?>
-            <meta name="<?= esc_attr((string) $episode->title); ?>" content="<?= esc_attr((string) $episode->description); ?>">
-        <?php endforeach; ?>
-        <!-- Podcast SEO Data END -->
-    <?php endif; ?>
+    <meta name="robots" content="noindex, follow">
 
     <base href="<?= esc_url($base_url); ?>/">
     <link rel="stylesheet" href="<?= esc_url($base_url); ?>/style.css">
