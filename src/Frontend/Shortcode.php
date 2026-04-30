@@ -361,7 +361,12 @@ final class Shortcode
 
         $src = add_query_arg($queryArgs, home_url('/podcast/player'));
 
-        return '<iframe style="width: 100%; min-height: 32.5rem; max-height: 100%; display: block;" src="' . esc_url($src) . '" loading="lazy" title="Podcast player"></iframe>';
+        $podcastData = $this->readCachedMediaData($playlistName, 'podcast', $mediaConfig);
+        $iframeTitle = is_array($podcastData) && isset($podcastData['channel']['title']) && $podcastData['channel']['title'] !== ''
+            ? wp_strip_all_tags((string) $podcastData['channel']['title'])
+            : 'Podcast player';
+
+        return '<iframe style="width: 100%; min-height: 32.5rem; max-height: 100%; display: block;" src="' . esc_url($src) . '" loading="lazy" title="' . esc_attr($iframeTitle) . '"></iframe>';
     }
 
     /**
