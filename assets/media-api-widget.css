@@ -63,9 +63,9 @@
                 opacity: 0;
             }
             .media-item-thumbnail {
-                object-fit: contain;
-                object-position: 50% 0px;
-                aspect-ratio: 1.777 / 1;
+                object-fit: cover;
+                object-position: center;
+                aspect-ratio: 16 / 9;
                 width: 100%;
                 height: 100%;
             }
