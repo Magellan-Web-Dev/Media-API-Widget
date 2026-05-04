@@ -28,7 +28,7 @@ final class Plugin
      * - Registers the /podcast/player rewrite rule so it is available
      *   immediately without a manual Permalinks flush.
      * - Creates (or upgrades) the API call log database table.
-     * - Seeds the eight default podcast-player shortcode fields if they
+     * - Seeds the eleven default podcast-player shortcode fields if they
      *   are not already present in the database.
      * - Records the first-activation timestamp for compatibility with
      *   older installs that relied on that option.
