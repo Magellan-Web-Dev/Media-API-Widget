@@ -217,7 +217,7 @@
                 height: inherit !important;
                 min-width: 100%!important;
                 max-height: 100%!important;
-                transition: 0.75s;
+                transition: 0.5s;
                 aspect-ratio: 1.777 / 1;
             }
             [data-lightboxmediacontenttype="video"] .media_item {
@@ -236,7 +236,7 @@
             }
             [data-lightboxmediacontenttype="video"] .video-thumbnail-wrapper iframe,
             [data-lightboxmediacontenttype="video"] .video-thumbnail-wrapper h1 {
-                transition: 0.75s;
+                transition: 0.5s;
                 font-family: inherit !important;
             }
             [data-lightboxmediacontenttype="video"] .hover-text-container {

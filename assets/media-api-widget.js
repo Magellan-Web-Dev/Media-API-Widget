@@ -604,12 +604,12 @@
                         });
                         setTimeout(() => {
                             if (!mouseOverElement && (new Date().getTime() - lastMouseOverTime) >= idleDelayTime && !showPlaylist) {
-                            elementsToHideWhenIdle.forEach(element => element.classList.add(`element-invisible`));
+                                elementsToHideWhenIdle.forEach(element => element.classList.add(`element-invisible`));
                             }
                         }, idleDelayTime)
                         }
                         if (!playlistButton) {
-                        lightboxPlaylistButton.classList.add(`element-invisible`);
+                            lightboxPlaylistButton.classList.add(`element-invisible`);
                         }
                     }
 
@@ -728,15 +728,14 @@
 
                     // Event Listeners On Playlist Items Clicked
 
-                    const lightboxPlaylistItems = lightboxPlaylistContent.querySelectorAll(`[data-itemclickableplaylist="${media_name}_${media_type}"]`);
-
-                    lightboxPlaylistItems.forEach(itemClicked => 
-                        itemClicked.addEventListener(`click`, () => {
-                        currentVideoIndex = playListSorted.findIndex(video => video.id === itemClicked.dataset.id);
-                        toggleLightboxPlayerOrPlaylist();
-                        initLightboxFrames();
-                        })
-                    );
+                    lightboxPlaylistContent.addEventListener(`click`, e => {
+                        const clickedItem = e.target.closest(`[data-itemclickableplaylist="${media_name}_${media_type}"]`);
+                        if (clickedItem) {
+                            currentVideoIndex = playListSorted.findIndex(video => video.id === clickedItem.dataset.id);
+                            toggleLightboxPlayerOrPlaylist();
+                            initLightboxFrames();
+                        }
+                    });
 
                     // Records When Last Time Carousel Was Advanced To Avoid User Click/Auto Interval Conflict
 
@@ -915,13 +914,13 @@
 
                     function toggleLightboxPlayerOrPlaylist(initialized) {
                         if (!initialized) {
-                        showPlaylist = !showPlaylist;
+                            showPlaylist = !showPlaylist;
                         }
                         if (showPlaylist) {
-	                            lightboxFrames.forEach(frame => {
-	                                frame.querySelector(`iframe`).src = ``;
-	                                frame.querySelector(`h1`).textContent = ``;
-	                            });
+                            lightboxFrames.forEach(frame => {
+                                frame.querySelector(`iframe`).src = ``;
+                                frame.querySelector(`h1`).textContent = ``;
+                            });
                             lightboxPlaylistButton.classList.add(`element-invisible`);
                             lightboxPlayerContainer.classList.add(`lightbox-container-off`);
                             lightboxPlaylistContainer.classList.remove(`lightbox-container-off`);
@@ -1112,6 +1111,9 @@
                         const target = e.target instanceof Element ? e.target : null;
                         const node = target ? target.closest('a[data-itemclickable="true"]') : null;
                         if (!node || node.dataset.itemclickablemediatype !== "video") {
+                            return;
+                        }
+                        if (node.closest('[data-lightboxplaylistcontent="true"]')) {
                             return;
                         }
 
