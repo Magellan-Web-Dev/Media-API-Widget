@@ -371,6 +371,8 @@ final class MediaContent
                 if (!empty($parsedBackupData['data']) && is_array($parsedBackupData['data'])) {
                     $state['parsedData']       = $parsedBackupData['data'];
                     $state['dataLoadedMethod'] = 'backup cache (rate limit)';
+                    // Backup loaded successfully — not an error condition.
+                } else {
                     $state['errorLoadingData'] = true;
                 }
             } else {
@@ -722,16 +724,9 @@ final class MediaContent
     /**
      * Emits the inline `<script>` block that initializes a single media widget.
      *
-     * Outputs a script that:
-     * 1. Reads `{playlist_name}_{type}_data` from localStorage.
-     * 2. Expires the cookie and logs an error if no data was found.
-     * 3. Logs an error if the data array is empty.
-     * 4. On the window 'load' event, queries all `[data-playlistname]` elements
-     *    matching this item's name and type, then calls `initialize_media()`.
-     *
-     * The emitted JavaScript variable name is `{playlist_name}_{type}_data`, so
-     * `playlist_name` values must be valid JavaScript identifier segments (i.e.
-     * the `sanitize_key()` output used throughout the plugin satisfies this).
+     * All dynamic PHP values are encoded with wp_json_encode() and the block is
+     * wrapped in an IIFE so that playlist names containing hyphens, digits, or
+     * other characters that are invalid in JS identifiers cannot break the script.
      *
      * @param array<string,mixed> $config Resolved media config array.
      * @return void
@@ -742,46 +737,49 @@ final class MediaContent
         $podcastPlatform = $config['podcast_platform'];
         $playlistName    = $config['playlist_name'];
         $cookieName      = $config['cookie_name'];
+
+        $jsName     = wp_json_encode($playlistName);
+        $jsType     = wp_json_encode($type);
+        $jsPlatform = wp_json_encode($podcastPlatform);
+        $jsCookie   = wp_json_encode($cookieName);
+        $jsKey      = wp_json_encode($playlistName . '_' . $type . '_playlist');
+        $jsLabel    = wp_json_encode($playlistName . '_' . $type);
         ?>
 
-        <!-- Media API "<?= $playlistName ?>_<?= $type ?>" Code Start -->
+        <!-- Media API "<?= esc_html($playlistName) ?>_<?= esc_html($type) ?>" Code Start -->
 
         <script>
+        (function () {
+            const storageKey = <?= $jsKey ?>;
+            const label      = <?= $jsLabel ?>;
+            const mediaData  = JSON.parse(localStorage.getItem(storageKey));
 
-            // Load <?= $type ?> Data From Local Storage
-
-            const <?= $playlistName ?>_<?= $type ?>_data = JSON.parse(localStorage.getItem("<?= $playlistName ?>_<?= $type ?>_playlist"));
-
-            // If No Data Found In Local Storage, Clear Cookie
-
-            if (!<?= $playlistName ?>_<?= $type ?>_data && "<?= $cookieName ?>") {
-                document.cookie = "<?= $cookieName ?>=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            if (!mediaData && <?= $jsCookie ?>) {
+                document.cookie = <?= $jsCookie ?> + "=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
             }
 
-            // Console Error If No Data Found
-
-            if (!<?= $playlistName ?>_<?= $type ?>_data) {
-                console.error("No data found for `<?= $playlistName ?>_<?= $type ?>` or data in Local Storage was deleted.  Check your internet connection and reload the page.");
+            if (!mediaData) {
+                console.error("No data found for `" + label + "` or data in Local Storage was deleted.  Check your internet connection and reload the page.");
             }
 
-            if (<?= $playlistName ?>_<?= $type ?>_data && <?= $playlistName ?>_<?= $type ?>_data.length === 0) {
-                console.error("`<?= $playlistName ?>_<?= $type ?>` data cannot be loaded.. Data is empty.");
+            if (mediaData && mediaData.length === 0) {
+                console.error("`" + label + "` data cannot be loaded.. Data is empty.");
             }
-
-            // Initialize Media
 
             window.addEventListener("load", () => {
-                const media_items = document.querySelectorAll(`[data-playlistname="<?= $playlistName ?>"]`);
+                const media_items = document.querySelectorAll('[data-playlistname="' + <?= $jsName ?> + '"]');
 
-                initialize_media([...media_items].filter(item => item.dataset.mediaplatform === "<?= $type ?>" && item.dataset.playlistname === "<?= $playlistName ?>"),
-                    <?= $playlistName ?>_<?= $type ?>_data,
-                    "<?= $playlistName ?>", "<?= $type ?>",
-                    "<?= $podcastPlatform ?>"
+                initialize_media(
+                    [...media_items].filter(item => item.dataset.mediaplatform === <?= $jsType ?> && item.dataset.playlistname === <?= $jsName ?>),
+                    mediaData,
+                    <?= $jsName ?>,
+                    <?= $jsType ?>,
+                    <?= $jsPlatform ?>
                 );
             });
-
+        })();
         </script>
-        <!-- Media API "<?= $playlistName ?>_<?= $type ?>" Code End -->
+        <!-- Media API "<?= esc_html($playlistName) ?>_<?= esc_html($type) ?>" Code End -->
         <?php
     }
 

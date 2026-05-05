@@ -1116,6 +1116,9 @@
                         if (node.closest('[data-lightboxplaylistcontent="true"]')) {
                             return;
                         }
+                        if (node.dataset.itemclickableplaylist !== `${media_name}_${media_type}`) {
+                            return;
+                        }
 
                         const lightboxImage = node.dataset.lightboxshowlogoimgurl ? node.dataset.lightboxshowlogoimgurl : null;
                         const lightboxThemeColor = node.dataset.lightboxthemecolor ? node.dataset.lightboxthemecolor : null;
@@ -1261,7 +1264,11 @@
                             return;
                         }
 
-                        if (node.dataset.lightboxshowplaylist && node.dataset.lightboxshowplaylist === "true" && node.dataset.itemclickablemediatype === "audio") {
+                        if (
+                            node.dataset.itemclickableplaylist === `${media_name}_${media_type}` &&
+                            node.dataset.lightboxshowplaylist === "true" &&
+                            node.dataset.itemclickablemediatype === "audio"
+                        ) {
                             audio_lightbox_activate_handler(node);
                         }
                     });
