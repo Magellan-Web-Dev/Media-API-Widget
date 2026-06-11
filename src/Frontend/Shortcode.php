@@ -149,6 +149,7 @@ final class Shortcode
             'podcastplayerscrollcolor' => '',
             'podcastplayertextcolor' => '',
             'showepisodedateaftertitle' => '',
+            'showlightbox' => 'true',
         ];
 
         $defaults = $this->mergeAdminShortcodeDefaults($defaults, $adminShortcodeValues);
@@ -222,6 +223,7 @@ final class Shortcode
             'podcastplayerscrollcolor' => (string) $atts['podcastplayerscrollcolor'],
             'podcastplayertextcolor' => (string) $atts['podcastplayertextcolor'],
             'showepisodedateaftertitle' => (string) $atts['showepisodedateaftertitle'],
+            'showlightbox' => $this->isTruthy((string) $atts['showlightbox']),
         ];
 
         $renderData = $this->normalizeRenderData($mediaData, $mediaType, $podcastPlatform, $itemData['thumbnail'], $itemData['orderdescending']);
@@ -781,6 +783,7 @@ final class Shortcode
             'podcastplayertextcolor' => ltrim((string) $itemData['podcastplayertextcolor'], '#'),
             'showepisodedateaftertitle' => (string) $itemData['showepisodedateaftertitle'],
             'noStyling' => (bool) $itemData['nostyling'],
+            'showLightbox' => (bool) $itemData['showlightbox'],
         ];
     }
 
@@ -832,6 +835,7 @@ final class Shortcode
                 'podcastplayerscrollcolor' => '',
                 'podcastplayertextcolor' => '',
                 'showepisodedateaftertitle' => '',
+                'showLightbox' => true,
             ];
         }
 
@@ -875,6 +879,7 @@ final class Shortcode
         }
 
         $lightboxPlaylistAttr = $settings['lightboxshowplaylist'] ? ' data-lightboxshowplaylist="true"' : '';
+        $showLightboxAttr = ($settings['showLightbox'] ?? true) ? '' : ' data-showlightbox="false"';
         $lightboxLogoAttr = trim((string) ($settings['lightboxshowlogoimgurl'] ?? '')) !== ''
             ? ' data-lightboxshowlogoimgurl="' . esc_url((string) $settings['lightboxshowlogoimgurl']) . '"'
             : '';
@@ -940,6 +945,7 @@ final class Shortcode
                 $lightboxThemeColorAttr .
                 $trackSelectAttr .
                 $podcastAttrs .
+                $showLightboxAttr .
             '>' .
                 '<div' . $wrapperClass . '>' .
                     '<img' . $imgClass . ' src="' . esc_url($thumbnailUrl) . '" width="' . esc_attr((string) $thumbnailWidth) . '" height="' . esc_attr((string) $thumbnailHeight) . '" alt="' . esc_attr($title) . '">' .

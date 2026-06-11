@@ -115,14 +115,15 @@
                 // Set Styling For Lightbox Playlist Items
                 
                 if (playlistItem) {
-                    settings = { 
+                    settings = {
                         showPlayButton: true,
                         playButtonIconImgUrl: null,
                         playButtonStyling: "width: 50%; height: 50%; opacity: 0.3;",
                         showTextOverlay: false,
                         instructionMessage: null,
                         fontFamily: null,
-                        lightboxshowplaylist: false
+                        lightboxshowplaylist: false,
+                        showLightbox: true
                     }
                 }
 
@@ -139,7 +140,7 @@
 	                const { name, type } = info;
 	                const mediaType = type === "youtube" || type === "vimeo" ? "video" : "audio";
 	                const { title, thumbnail, publishedDate, id, description } = item;
-	                const { showPlayButton, playButtonIconImgUrl, playButtonStyling, showTextOverlay, instructionMessage, fontFamily, lightboxshowplaylist, showPlaybar, playbarColor } = settings;
+	                const { showPlayButton, playButtonIconImgUrl, playButtonStyling, showTextOverlay, instructionMessage, fontFamily, lightboxshowplaylist, showPlaybar, playbarColor, showLightbox } = settings;
 	                const safeTitleAttr = escape_attr(title ?? "");
 	                const safeOverlayTitle = format_overlay_title(item);
 	                const safePlaylistTitle = escape_html(media_title_text(item));
@@ -149,6 +150,7 @@
 	                    <a ${settings.fontFamily ? `style=${fontFamily}` : ""} class="media_item${showTextOverlay ? `-text-overlay-enabled` : ``}" data-itemclickablemediatype="${mediaType}" data-itemclickable="true" data-itemclickableplaylist="${name}_${type}" 
 	                        data-id="${id}" ${lightboxshowplaylist ? `data-lightboxshowplaylist="true"` : ""} ${item.trackSelect !== null ? `data-trackselect=${Number(item.trackSelect)}` : ""}
 	                        ${customPodcastPlayer  ? podcastPlayerData : ""}
+	                        ${showLightbox === false ? `data-showlightbox="false"` : ""}
 	                    >
 	                        <div class="media-item-thumbnail-text-wrapper">
 	                            <img class="media-item-thumbnail" src="${thumbnail.url}" width="${thumbnail.width ? thumbnail.width : 1280}" height="${thumbnail.height ? thumbnail.height : 720}" alt="${safeTitleAttr}">
@@ -251,7 +253,8 @@
                         const instructionMessage = itemData.instructionMessage ? itemData.instructionMessage : media_type === "youtube" ? "Click Here To Watch" : media_type === "podcast" ? "Click Here To Listen" : "";
 
                         const lightboxshowplaylist = itemData.lightboxshowplaylist && itemData.lightboxshowplaylist === "true" ? true : false;
-                        
+                        const showLightbox = itemData.showlightbox !== "false";
+
                         // Thumbnail
 
                         const thumbnailimg = itemData.thumbnail ? itemData.thumbnail : null;
@@ -290,7 +293,8 @@
                             fontFamily,
                             lightboxshowplaylist,
                             showPlaybar,
-                            playbarColor
+                            playbarColor,
+                            showLightbox
                         };
 
                         const info = {
@@ -1130,6 +1134,25 @@
                             return;
                         }
 
+                        const videoEmbedBaseUrl = media_type === "vimeo" ? "https://player.vimeo.com/video/" : "https://www.youtube.com/embed/";
+                        const embedUrl = `${videoEmbedBaseUrl}${node.dataset.id}`;
+
+                        document.dispatchEvent(new CustomEvent("mediaApiWidgetItemClick", {
+                            bubbles: true,
+                            detail: {
+                                playlistName: media_name,
+                                mediaType: media_type,
+                                embedUrl,
+                                itemId: node.dataset.id,
+                                showLightbox: node.dataset.showlightbox !== "false",
+                                element: node
+                            }
+                        }));
+
+                        if (node.dataset.showlightbox === "false") {
+                            return;
+                        }
+
                         const lightboxImage = node.dataset.lightboxshowlogoimgurl ? node.dataset.lightboxshowlogoimgurl : null;
                         const lightboxThemeColor = node.dataset.lightboxthemecolor ? node.dataset.lightboxthemecolor : null;
                         const lightboxFont = node.dataset.lightboxfont ? node.dataset.lightboxfont : null;
@@ -1150,6 +1173,46 @@
                             lightbox_clear();
                         }
                     });
+
+                    // Computes the podcast embed URL for a clicked audio item (shared by event dispatch and lightbox handler)
+
+                    function compute_audio_embed_url(itemClicked) {
+                        if (podcast_platform === "omny") {
+                            const { channel } = media_data;
+                            const showName = channel.item[0].link.split("/")[4];
+                            return `https://omny.fm/shows/${showName}/playlists/podcast/embed?selectedClip=${itemClicked.dataset.id}`;
+                        }
+                        if (podcast_platform === "soundcloud") {
+                            const showEpisodeUrl = media_data.channel.item[0].link;
+                            const spliced = showEpisodeUrl.split("/");
+                            const urlOutput = `${spliced[0]}/${spliced[1]}/${spliced[2]}/${spliced[3]}`;
+                            return `https://w.soundcloud.com/player/?url=${urlOutput}&start_track=${itemClicked.dataset.trackselect}`;
+                        }
+                        if (podcast_platform === "buzzsprout") {
+                            const { channel } = media_data;
+                            const playlistId = channel.rssUrl.split("/")[3].split(".")[0];
+                            const episodeId = itemClicked.dataset.id.split("-")[1];
+                            return `https://www.buzzsprout.com/${playlistId}/${episodeId}`;
+                        }
+                        if (podcast_platform === "embed") {
+                            return typeof media_data === "string" ? media_data : null;
+                        }
+                        if (podcast_platform === "custom") {
+                            const rssUrl = media_data.channel?.rssUrl;
+                            if (!rssUrl) return null;
+                            const mode = itemClicked.dataset.podcastplayermode;
+                            const playButtonColor = itemClicked.dataset.podcastplayerbuttoncolor;
+                            const color = itemClicked.dataset.podcastplayercolor;
+                            const progressBarColor = itemClicked.dataset.podcastprogressplayerbarcolor;
+                            const highlightColor = itemClicked.dataset.podcastplayerhighlightcolor;
+                            const font = itemClicked.dataset.podcastplayerfont;
+                            const scrollbarColor = itemClicked.dataset.podcastplayerscrollcolor;
+                            const textColor = itemClicked.dataset.podcastplayertextcolor;
+                            const showEpisodeDateAfterTitle = itemClicked.dataset.showepisodedateaftertitle === "true" ? "adddatetotitle=true" : "";
+                            return `${window.location.origin}/podcast/player?url=${rssUrl}&track=${itemClicked.dataset.trackselect}&mode=${mode}&buttoncolor=${playButtonColor}&color1=${color}&progressbarcolor=${progressBarColor}&highlightcolor=${highlightColor}&font=${font}&scrollcolor=${scrollbarColor}&textcolor=${textColor}&${showEpisodeDateAfterTitle}`;
+                        }
+                        return null;
+                    }
 
                     // Podcast Audio Lightbox Activate Handler
 
@@ -1276,10 +1339,23 @@
 
                         if (
                             node.dataset.itemclickableplaylist === `${media_name}_${media_type}` &&
-                            node.dataset.lightboxshowplaylist === "true" &&
                             node.dataset.itemclickablemediatype === "audio"
                         ) {
-                            audio_lightbox_activate_handler(node);
+                            document.dispatchEvent(new CustomEvent("mediaApiWidgetItemClick", {
+                                bubbles: true,
+                                detail: {
+                                    playlistName: media_name,
+                                    mediaType: media_type,
+                                    embedUrl: compute_audio_embed_url(node),
+                                    itemId: node.dataset.id,
+                                    showLightbox: node.dataset.showlightbox !== "false",
+                                    element: node
+                                }
+                            }));
+
+                            if (node.dataset.lightboxshowplaylist === "true" && node.dataset.showlightbox !== "false") {
+                                audio_lightbox_activate_handler(node);
+                            }
                         }
                     });
                 }

@@ -29,7 +29,8 @@ A WordPress plugin that syncs YouTube playlists and podcast RSS feeds to the fro
 9. [SEO Meta Tags](#seo-meta-tags)
 10. [Podcast Player (`/podcast/player`)](#podcast-player-podcastplayer)
 11. [API Statistics](#api-statistics)
-12. [Backward Compatibility](#backward-compatibility)
+12. [JavaScript Events](#javascript-events)
+13. [Backward Compatibility](#backward-compatibility)
 
 ---
 
@@ -304,6 +305,7 @@ Place this shortcode anywhere on the page — above, below, or beside the grid. 
 | `mediatitle` | `false` | When `true`, renders only the episode title as a `<p>` tag — no thumbnail. |
 | `mediadescription` | `false` | When `true`, renders only the episode description as a `<p>` tag — no thumbnail. |
 | `mediadescriptiontextcolor` | _(none)_ | CSS color applied to the `mediatitle` / `mediadescription` output. |
+| `showlightbox` | `true` | When `false`, clicking the item dispatches the [JS click event](#javascript-events) but does **not** open the lightbox. Useful for driving custom behavior without the built-in player. Omitting the attribute (default) preserves existing lightbox behavior. |
 
 ---
 
@@ -521,6 +523,59 @@ Every call to an external API (YouTube, iTunes lookup, podcast RSS) is logged to
 - Timestamp (GMT)
 
 Logs older than **48 hours** are pruned automatically (checked at most once per hour). The **API Stats** admin page shows totals, per-playlist breakdowns, and hourly detail for the **last 24 hours**.
+
+---
+
+## JavaScript Events
+
+Every time a YouTube, Vimeo, or podcast thumbnail is clicked — regardless of the `showlightbox` attribute — the plugin dispatches a `mediaApiWidgetItemClick` `CustomEvent` on `document`. External scripts can listen for this event to react to media interactions without modifying the plugin.
+
+### `mediaApiWidgetItemClick`
+
+**Fires:** On any click of a media item rendered by the plugin. Fires even when `showlightbox="false"` and the lightbox does not open.
+
+**Listener:**
+```javascript
+document.addEventListener("mediaApiWidgetItemClick", (e) => {
+    const { playlistName, mediaType, embedUrl, itemId, showLightbox, element } = e.detail;
+});
+```
+
+**`event.detail` properties:**
+
+| Property | Type | Description |
+|---|---|---|
+| `playlistName` | `string` | The `playlist_name` slug of the item's playlist. |
+| `mediaType` | `string` | The media platform: `"youtube"`, `"podcast"`, or `"vimeo"`. |
+| `embedUrl` | `string \| null` | The iframe src URL that the lightbox would (or does) load. For YouTube: `https://www.youtube.com/embed/{id}`. For podcasts: the platform-specific embed URL. `null` if the URL cannot be determined. |
+| `itemId` | `string` | YouTube video ID or podcast episode GUID. |
+| `showLightbox` | `boolean` | `true` when the lightbox is opening; `false` when `showlightbox="false"` is set on the shortcode. |
+| `element` | `Element` | The `<a>` DOM node that was clicked. |
+
+**Example — push to a GTM / analytics data layer:**
+```javascript
+document.addEventListener("mediaApiWidgetItemClick", (e) => {
+    const { playlistName, mediaType, itemId, showLightbox } = e.detail;
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push({
+        event: "media_item_click",
+        playlist: playlistName,
+        media_type: mediaType,
+        item_id: itemId,
+        opened_lightbox: showLightbox
+    });
+});
+```
+
+**Example — open a custom modal instead of the built-in lightbox:**
+```javascript
+document.addEventListener("mediaApiWidgetItemClick", (e) => {
+    // showlightbox="false" is set on the shortcode — the plugin will not open a lightbox
+    if (!e.detail.showLightbox) {
+        openMyCustomModal(e.detail.embedUrl, e.detail.playlistName);
+    }
+});
+```
 
 ---
 

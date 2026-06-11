@@ -49,6 +49,7 @@ final class AboutPage
                 <a href="#maw-podcast-player">Podcast Player</a>
                 <a href="#maw-seo">SEO</a>
                 <a href="#maw-caching">Caching</a>
+                <a href="#maw-js-events">JS Events</a>
             </nav>
 
             <!-- OVERVIEW -->
@@ -288,6 +289,7 @@ final class AboutPage
                         <tr><td><code>mediadescription</code></td><td><code>false</code></td><td>When <code>true</code>, output the episode description as a <code>&lt;p&gt;</code> tag only — no thumbnail rendered.</td></tr>
                         <tr><td><code>mediadescriptiontextcolor</code></td><td>—</td><td>CSS color for the <code>mediatitle</code> / <code>mediadescription</code> output.</td></tr>
                         <tr><td><code>nostyling</code></td><td><code>false</code></td><td>When <code>true</code>, suppresses all plugin CSS class names from the rendered output. Applies to all render modes: single item, text-only, static grid, and user-search grid. Data attributes used by the lightbox JS are unaffected.</td></tr>
+                        <tr><td><code>showlightbox</code></td><td><code>true</code></td><td>When <code>false</code>, clicking the item dispatches the <a href="#maw-js-events"><code>mediaApiWidgetItemClick</code></a> JS event but does <strong>not</strong> open the lightbox. Omitting this attribute (the default) preserves normal lightbox behavior for all existing shortcodes.</td></tr>
                     </tbody>
                 </table>
 
@@ -465,6 +467,58 @@ final class AboutPage
                     </tbody>
                 </table>
                 <p class="description">Tags are only output when cached media data is available. No external request is made at tag-output time — the cache is read in-place.</p>
+            </section>
+
+            <!-- JAVASCRIPT EVENTS -->
+            <section id="maw-js-events" class="maw-section">
+                <h2>JavaScript Events</h2>
+                <p>Every time a YouTube, Vimeo, or podcast thumbnail is clicked — regardless of the <code>showlightbox</code> attribute — the plugin dispatches a <code>mediaApiWidgetItemClick</code> <code>CustomEvent</code> on <code>document</code>. External scripts on the page can listen for this event to react to media interactions without touching the plugin code.</p>
+
+                <div class="maw-callout">
+                    <strong>Fires on every click.</strong> The event fires even when <code>showlightbox="false"</code> is set and no lightbox opens, making it the correct hook for custom modals, analytics, or any other side effect you want to trigger on media item click.
+                </div>
+
+                <h3>Listening for the Event</h3>
+                <pre class="maw-code">document.addEventListener("mediaApiWidgetItemClick", (e) =&gt; {
+    const { playlistName, mediaType, embedUrl, itemId, showLightbox, element } = e.detail;
+});</pre>
+
+                <h3><code>event.detail</code> Properties</h3>
+                <table class="widefat striped maw-table maw-about-table">
+                    <thead><tr><th style="width:160px;">Property</th><th style="width:120px;">Type</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>playlistName</code></td><td><code>string</code></td><td>The <code>playlist_name</code> slug of the item's playlist.</td></tr>
+                        <tr><td><code>mediaType</code></td><td><code>string</code></td><td>The media platform: <code>"youtube"</code>, <code>"podcast"</code>, or <code>"vimeo"</code>.</td></tr>
+                        <tr><td><code>embedUrl</code></td><td><code>string | null</code></td><td>The iframe <code>src</code> URL the lightbox would (or does) load. For YouTube: <code>https://www.youtube.com/embed/{id}</code>. For podcasts: the platform-specific embed URL. <code>null</code> if the URL cannot be determined.</td></tr>
+                        <tr><td><code>itemId</code></td><td><code>string</code></td><td>YouTube video ID or podcast episode GUID.</td></tr>
+                        <tr><td><code>showLightbox</code></td><td><code>boolean</code></td><td><code>true</code> when the lightbox is opening; <code>false</code> when <code>showlightbox="false"</code> is set on the shortcode.</td></tr>
+                        <tr><td><code>element</code></td><td><code>Element</code></td><td>The <code>&lt;a&gt;</code> DOM node that was clicked.</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Example — Push to a GTM / Analytics Data Layer</h3>
+                <pre class="maw-code">document.addEventListener("mediaApiWidgetItemClick", (e) =&gt; {
+    const { playlistName, mediaType, itemId, showLightbox } = e.detail;
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push({
+        event: "media_item_click",
+        playlist: playlistName,
+        media_type: mediaType,
+        item_id: itemId,
+        opened_lightbox: showLightbox
+    });
+});</pre>
+
+                <h3>Example — Open a Custom Modal Instead of the Built-in Lightbox</h3>
+                <p>Set <code>showlightbox="false"</code> on the shortcode, then handle the click entirely in your own code:</p>
+                <pre class="maw-code">// Shortcode: [media-api-widget-render playlist_name="my_show" media_platform="youtube" orderdescending="1" showlightbox="false"]
+
+document.addEventListener("mediaApiWidgetItemClick", (e) =&gt; {
+    if (!e.detail.showLightbox) {
+        // The plugin will not open a lightbox — open your own instead
+        openMyCustomModal(e.detail.embedUrl, e.detail.playlistName);
+    }
+});</pre>
             </section>
 
             <!-- CACHING -->
