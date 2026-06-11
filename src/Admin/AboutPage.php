@@ -45,6 +45,7 @@ final class AboutPage
                 <a href="#maw-shortcodes">Shortcodes</a>
                 <a href="#maw-render-attrs">Render Attributes</a>
                 <a href="#maw-grid">Grid Mode</a>
+                <a href="#maw-grid-search">Grid Search &amp; Pagination</a>
                 <a href="#maw-podcast-player">Podcast Player</a>
                 <a href="#maw-seo">SEO</a>
                 <a href="#maw-caching">Caching</a>
@@ -161,7 +162,7 @@ final class AboutPage
             <!-- SHORTCODES -->
             <section id="maw-shortcodes" class="maw-section">
                 <h2>Shortcodes</h2>
-                <p>The plugin registers four shortcode tags:</p>
+                <p>The plugin registers five shortcode tags:</p>
 
                 <h3><code>[media-api-widget]</code> — Output a Field Value</h3>
                 <p>Outputs the stored value of a shortcode field as plain text. Use it to inject centrally managed copy anywhere on a page.</p>
@@ -226,6 +227,26 @@ final class AboutPage
     podcastplayerfont="Poppins"
     showepisodedateaftertitle="true"
 ]</pre>
+
+                <hr>
+
+                <h3><code>[media-api-widget-grid-search]</code> — Grid Search Bar</h3>
+                <p>Renders a search bar that pairs with a <code>[media-api-widget-render]</code> grid running in <code>multiplegridusersearch="true"</code> mode. The bar is linked to the correct grid by matching <code>playlist_name</code> and <code>media_platform</code>. It can be placed anywhere on the page — it does not need to be adjacent to the grid shortcode.</p>
+
+                <p><strong>Basic usage:</strong></p>
+                <pre class="maw-code">[media-api-widget-grid-search playlist_name="my_show" media_platform="youtube"]</pre>
+
+                <p><strong>With a custom placeholder:</strong></p>
+                <pre class="maw-code">[media-api-widget-grid-search playlist_name="my_show" media_platform="youtube" placeholder="Search episodes..."]</pre>
+
+                <table class="widefat striped maw-table maw-about-table" style="margin-top:12px;">
+                    <thead><tr><th style="width:200px;">Attribute</th><th style="width:160px;">Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>playlist_name</code></td><td><em>required</em></td><td>Must match the <code>playlist_name</code> on the target grid shortcode.</td></tr>
+                        <tr><td><code>media_platform</code></td><td><em>required</em></td><td>Must match the <code>media_platform</code> on the target grid shortcode.</td></tr>
+                        <tr><td><code>placeholder</code></td><td><code>Search...</code></td><td>Placeholder text shown inside the search input field.</td></tr>
+                    </tbody>
+                </table>
             </section>
 
             <!-- RENDER ATTRIBUTES -->
@@ -266,6 +287,7 @@ final class AboutPage
                         <tr><td><code>mediatitle</code></td><td><code>false</code></td><td>When <code>true</code>, output the episode title as a <code>&lt;p&gt;</code> tag only — no thumbnail rendered.</td></tr>
                         <tr><td><code>mediadescription</code></td><td><code>false</code></td><td>When <code>true</code>, output the episode description as a <code>&lt;p&gt;</code> tag only — no thumbnail rendered.</td></tr>
                         <tr><td><code>mediadescriptiontextcolor</code></td><td>—</td><td>CSS color for the <code>mediatitle</code> / <code>mediadescription</code> output.</td></tr>
+                        <tr><td><code>nostyling</code></td><td><code>false</code></td><td>When <code>true</code>, suppresses all plugin CSS class names from the rendered output. Applies to all render modes: single item, text-only, static grid, and user-search grid. Data attributes used by the lightbox JS are unaffected.</td></tr>
                     </tbody>
                 </table>
 
@@ -302,7 +324,10 @@ final class AboutPage
                         <tr><td><code>multiplegridepisoderange</code></td><td>—</td><td>Show only items in an episode range. Format: <code>1-10</code>. Overrides search and limit.</td></tr>
                         <tr><td><code>multiplegridgap</code></td><td><code>48px</code></td><td>CSS <code>gap</code> between grid items.</td></tr>
                         <tr><td><code>multiplegridminsize</code></td><td><code>400px</code></td><td>Minimum column width in the <code>auto-fill</code> grid.</td></tr>
-                        <tr><td><code>multiplegridtext</code></td><td>—</td><td>Show <code>title</code> or <code>description</code> below each grid item. YouTube only.</td></tr>
+                        <tr><td><code>multiplegridtext</code></td><td>—</td><td>Show text below each grid item: <code>title</code>, <code>description</code>, or <code>both</code>. YouTube only.</td></tr>
+                        <tr><td><code>multiplegridusersearch</code></td><td><code>false</code></td><td>Set to <code>true</code> to enable the user-searchable + paginated grid mode. See <a href="#maw-grid-search">Grid Search &amp; Pagination</a>.</td></tr>
+                        <tr><td><code>multiplegridperpage</code></td><td><code>12</code></td><td>Max items per page when <code>multiplegridusersearch="true"</code>.</td></tr>
+                        <tr><td><code>noresults</code></td><td>—</td><td>Text shown when a user search yields no results (user-search grid only). Falls back to a generic message when empty.</td></tr>
                     </tbody>
                 </table>
 
@@ -325,6 +350,57 @@ final class AboutPage
     multiplegridsearch="season 2"
     multiplegridlimititems="12"
 ]</pre>
+            </section>
+
+            <!-- GRID SEARCH & PAGINATION -->
+            <section id="maw-grid-search" class="maw-section">
+                <h2>Grid Search &amp; Pagination</h2>
+                <p>When <code>multiplegridusersearch="true"</code> is added to <code>[media-api-widget-render]</code>, the grid switches to an interactive mode with AJAX-powered live search and page-by-page navigation. A companion <code>[media-api-widget-grid-search]</code> shortcode provides the search bar.</p>
+
+                <h3>How It Works</h3>
+                <ul>
+                    <li>The first page renders server-side — no AJAX on initial load.</li>
+                    <li>Typing in the search bar fires a debounced (400 ms) AJAX request that filters and re-renders the grid.</li>
+                    <li>The search bar dropdown lets the visitor search by <strong>Title</strong> or <strong>Description</strong>.</li>
+                    <li>Clicking <strong>Prev</strong>, a page number, or <strong>Next</strong> also fires an AJAX request.</li>
+                    <li>A CSS class <code>loading</code> is applied to the wrapper element while any AJAX request is in flight, making the grid semi-transparent and non-interactive.</li>
+                    <li>The search bar shortcode can be placed anywhere on the page — it does not need to be adjacent to the grid.</li>
+                    <li>Use <code>noresults="..."</code> to set custom text that appears when a search returns zero items.</li>
+                </ul>
+
+                <div class="maw-callout">
+                    <strong>Note:</strong> <code>multiplegridusersearch</code> and <code>multiplegrid</code> are mutually exclusive. When user search is enabled, the standard static grid path is bypassed entirely. All other grid attributes (<code>multiplegridgap</code>, <code>multiplegridminsize</code>, <code>multiplegridtext</code>, <code>multiplegridepisoderange</code>, etc.) continue to work as filters and display options within this mode.
+                </div>
+
+                <h3>Full Example</h3>
+                <pre class="maw-code">[media-api-widget-grid-search
+    playlist_name="my_show"
+    media_platform="youtube"
+    placeholder="Search episodes..."
+]
+
+[media-api-widget-render
+    playlist_name="my_show"
+    media_platform="youtube"
+    multiplegridusersearch="true"
+    multiplegridperpage="12"
+    multiplegridtext="both"
+    multiplegridgap="32px"
+    multiplegridminsize="300px"
+    noresults="No episodes matched your search."
+]</pre>
+
+                <h3>Generated HTML Structure</h3>
+                <p>The wrapper element exposes data attributes used by the JavaScript to wire up the search bar and pagination. The <code>loading</code> class is toggled on this element during AJAX requests.</p>
+                <pre class="maw-code">&lt;div class="maw-grid-search-wrapper"
+     data-maw-grid-id="my_show_youtube"
+     data-maw-playlist="my_show"
+     data-maw-mediatype="youtube"
+     data-maw-perpage="12"
+     data-maw-grid-key="..."&gt;
+  &lt;div class="maw-grid-items"&gt;...&lt;/div&gt;
+  &lt;div class="maw-grid-pagination"&gt;...&lt;/div&gt;
+&lt;/div&gt;</pre>
             </section>
 
             <!-- PODCAST PLAYER -->

@@ -36,6 +36,9 @@ final class Shortcode
         add_shortcode('media-api-widget-render', [$this, 'renderMediaShortcode']);
         add_shortcode('media-api-widget-item', [$this, 'renderMediaShortcode']);
         add_shortcode('media-api-podcast-player', [$this, 'renderPodcastPlayerShortcode']);
+        add_shortcode('media-api-widget-grid-search', [$this, 'renderGridSearchShortcode']);
+        add_action('wp_ajax_maw_grid_search', [$this, 'handleGridSearchAjax']);
+        add_action('wp_ajax_nopriv_maw_grid_search', [$this, 'handleGridSearchAjax']);
     }
 
     /**
@@ -133,6 +136,10 @@ final class Shortcode
             'multiplegridgap' => '48px',
             'multiplegridminsize' => '400px',
             'multiplegridtext' => '',
+            'multiplegridusersearch' => 'false',
+            'multiplegridperpage' => '12',
+            'nostyling' => 'false',
+            'noresults' => '',
             'podcastplayermode' => '',
             'podcastplayerbuttoncolor' => '',
             'podcastplayercolor' => '',
@@ -202,6 +209,10 @@ final class Shortcode
             'multiplegridgap' => (string) $atts['multiplegridgap'],
             'multiplegridminsize' => (string) $atts['multiplegridminsize'],
             'multiplegridtext' => $mediaType === 'youtube' ? $this->sanitizeMultipleGridText((string) $atts['multiplegridtext']) : '',
+            'multiplegridusersearch' => $this->isTruthy((string) $atts['multiplegridusersearch']),
+            'multiplegridperpage' => max(1, (int) ($atts['multiplegridperpage'] ?: 12)),
+            'nostyling' => $this->isTruthy((string) $atts['nostyling']),
+            'noresults' => sanitize_text_field((string) $atts['noresults']),
             'podcastplayermode' => (string) $atts['podcastplayermode'],
             'podcastplayerbuttoncolor' => (string) $atts['podcastplayerbuttoncolor'],
             'podcastplayercolor' => (string) $atts['podcastplayercolor'],
@@ -231,10 +242,16 @@ final class Shortcode
                     if ($itemData['mediadescriptiontextcolor'] !== '') {
                         $style = ' style="color: ' . esc_attr($itemData['mediadescriptiontextcolor']) . '"';
                     }
-                    return '<p' . $style . ' class="media-description-text">' . esc_html($descriptionOrTitle) . '</p>';
+                    $cls = $itemData['nostyling'] ? '' : ' class="media-description-text"';
+                    return '<p' . $cls . $style . '>' . esc_html($descriptionOrTitle) . '</p>';
                 }
             }
             return '';
+        }
+
+        if ($itemData['multiplegridusersearch'] && count($renderData) >= 1) {
+            $settings = $this->buildRenderSettings($itemData, $mediaType);
+            return $this->renderUserSearchGrid($renderData, $itemData, $settings, $playlistName, $mediaType);
         }
 
         if ($itemData['multiplegrid'] && count($renderData) > 1) {
@@ -277,7 +294,8 @@ final class Shortcode
                 $gridHtml .= $this->renderMediaItem($row, $gridSettings, false, $playlistName, $mediaType);
             }
 
-            return '<div class="media_items_multiple_grid_layout" style="gap: ' . esc_attr($itemData['multiplegridgap']) . '; grid-template-columns: repeat(auto-fill, minmax(min(100%, ' . esc_attr($itemData['multiplegridminsize']) . '), 1fr));">' . $gridHtml . '</div>';
+            $gridClass = $itemData['nostyling'] ? '' : ' class="media_items_multiple_grid_layout"';
+            return '<div' . $gridClass . ' style="gap: ' . esc_attr($itemData['multiplegridgap']) . '; grid-template-columns: repeat(auto-fill, minmax(min(100%, ' . esc_attr($itemData['multiplegridminsize']) . '), 1fr));">' . $gridHtml . '</div>';
         }
 
         $index = $this->resolveIndex($renderData, $itemData, $mediaType, $podcastPlatform);
@@ -762,6 +780,7 @@ final class Shortcode
             'podcastplayerscrollcolor' => ltrim((string) $itemData['podcastplayerscrollcolor'], '#'),
             'podcastplayertextcolor' => ltrim((string) $itemData['podcastplayertextcolor'], '#'),
             'showepisodedateaftertitle' => (string) $itemData['showepisodedateaftertitle'],
+            'noStyling' => (bool) $itemData['nostyling'],
         ];
     }
 
@@ -827,7 +846,8 @@ final class Shortcode
         $thumbnailWidth = isset($thumbnail['width']) ? (int) $thumbnail['width'] : 1280;
         $thumbnailHeight = isset($thumbnail['height']) ? (int) $thumbnail['height'] : 720;
 
-        $class = 'media_item' . ($settings['showTextOverlay'] ? '-text-overlay-enabled' : '');
+        $noStyling = !empty($settings['noStyling']);
+        $class = $noStyling ? '' : ('media_item' . ($settings['showTextOverlay'] ? '-text-overlay-enabled' : ''));
         $style = '';
         if ($settings['fontFamily'] !== '') {
             $style = ' style="font-family: ' . esc_attr((string) $settings['fontFamily']) . ';"';
@@ -873,14 +893,16 @@ final class Shortcode
             } else {
                 $playButtonInner = $this->playButtonIconSvg();
             }
-            $playButtonHtml = '<div class="media-item-play-button" style="' . esc_attr((string) $settings['playButtonStyling']) . '">' . $playButtonInner . '</div>';
+            $pbClass = $noStyling ? '' : ' class="media-item-play-button"';
+            $playButtonHtml = '<div' . $pbClass . ' style="' . esc_attr((string) $settings['playButtonStyling']) . '">' . $playButtonInner . '</div>';
         }
 
         $textOverlay = '';
         if ($settings['showTextOverlay']) {
             $audioTextStyle = $mediaType === 'audio' ? ' style="padding-bottom: max(10vw, 48px);"' : '';
+            $toClass = $noStyling ? '' : ' class="media-item-text-overlay"';
             $textOverlay =
-                '<div class="media-item-text-overlay"' . $audioTextStyle . '>' .
+                '<div' . $toClass . $audioTextStyle . '>' .
                     '<h3>' . $this->renderOverlayTitle($title, $episode) . '</h3>' .
                     '<p>' . esc_html((string) $settings['instructionMessage']) . '</p>' .
                 '</div>';
@@ -888,22 +910,26 @@ final class Shortcode
 
         $playlistHeading = '';
         if ($playlistItem) {
-            $playlistHeading = '<h3 class="playlist-episode-text">' . esc_html($episode !== -1 ? ('Episode ' . $episode) : $title) . '</h3>';
+            $phClass = $noStyling ? '' : ' class="playlist-episode-text"';
+            $playlistHeading = '<h3' . $phClass . '>' . esc_html($episode !== -1 ? ('Episode ' . $episode) : $title) . '</h3>';
         }
 
         $playBarHtml = '';
         if ($mediaType === 'audio' && $settings['showPlaybar']) {
-            $playBarHtml = $this->audioPlayBarSvg((string) $settings['playbarColor']);
+            $playBarHtml = $this->audioPlayBarSvg((string) $settings['playbarColor'], $noStyling);
         }
 
         $multipleGridTextHtml = '';
         if (!$playlistItem && isset($settings['multipleGridText'])) {
-            $multipleGridTextHtml = $this->renderMultipleGridText($item, (string) $settings['multipleGridText']);
+            $multipleGridTextHtml = $this->renderMultipleGridText($item, (string) $settings['multipleGridText'], $noStyling);
         }
 
+        $aClassAttr    = $class !== '' ? ' class="' . esc_attr($class) . '"' : '';
+        $wrapperClass  = $noStyling ? '' : ' class="media-item-thumbnail-text-wrapper"';
+        $imgClass      = $noStyling ? '' : ' class="media-item-thumbnail"';
         $mediaItemHtml =
             '<a' . $style .
-                ' class="' . esc_attr($class) . '"' .
+                $aClassAttr .
                 ' data-itemclickablemediatype="' . esc_attr($mediaType) . '"' .
                 ' data-itemclickable="true"' .
                 ' data-itemclickableplaylist="' . esc_attr($name . '_' . $type) . '"' .
@@ -915,8 +941,8 @@ final class Shortcode
                 $trackSelectAttr .
                 $podcastAttrs .
             '>' .
-                '<div class="media-item-thumbnail-text-wrapper">' .
-                    '<img class="media-item-thumbnail" src="' . esc_url($thumbnailUrl) . '" width="' . esc_attr((string) $thumbnailWidth) . '" height="' . esc_attr((string) $thumbnailHeight) . '" alt="' . esc_attr($title) . '">' .
+                '<div' . $wrapperClass . '>' .
+                    '<img' . $imgClass . ' src="' . esc_url($thumbnailUrl) . '" width="' . esc_attr((string) $thumbnailWidth) . '" height="' . esc_attr((string) $thumbnailHeight) . '" alt="' . esc_attr($title) . '">' .
                     $playButtonHtml .
                     $textOverlay .
                 '</div>' .
@@ -927,8 +953,9 @@ final class Shortcode
         $itemComment = '<!-- ' . esc_html($name) . ' ' . esc_html($type) . ' item - ' . esc_html($title) . ' (Published On - ' . esc_html($publishedDate) . ') -->';
 
         if ($multipleGridTextHtml !== '') {
+            $entryClass = $noStyling ? '' : ' class="media-item-multiple-grid-entry"';
             return $itemComment .
-                '<div class="media-item-multiple-grid-entry">' .
+                '<div' . $entryClass . '>' .
                     $mediaItemHtml .
                     $multipleGridTextHtml .
                 '</div>';
@@ -976,10 +1003,29 @@ final class Shortcode
      * @param string              $mode 'title' or 'description'.
      * @return string HTML `<div>` block, or ''.
      */
-    private function renderMultipleGridText(array $item, string $mode): string
+    private function renderMultipleGridText(array $item, string $mode, bool $noStyling = false): string
     {
-        $text = '';
+        $cls = static function (string $suffix) use ($noStyling): string {
+            return $noStyling ? '' : (' class="media-item-multiple-grid-text media-item-multiple-grid-text-' . esc_attr($suffix) . '"');
+        };
 
+        if ($mode === 'both') {
+            $titleText = trim((string) ($item['title'] ?? ''));
+            $descText  = trim((string) ($item['description'] ?? ''));
+            if ($titleText === '' && $descText === '') {
+                return '';
+            }
+            $out = '';
+            if ($titleText !== '') {
+                $out .= '<div' . $cls('title') . '>' . esc_html($titleText) . '</div>';
+            }
+            if ($descText !== '') {
+                $out .= '<div' . $cls('description') . '>' . esc_html($descText) . '</div>';
+            }
+            return $out;
+        }
+
+        $text = '';
         if ($mode === 'title') {
             $text = trim((string) ($item['title'] ?? ''));
         } elseif ($mode === 'description') {
@@ -990,7 +1036,7 @@ final class Shortcode
             return '';
         }
 
-        return '<div class="media-item-multiple-grid-text media-item-multiple-grid-text-' . esc_attr($mode) . '">' . esc_html($text) . '</div>';
+        return '<div' . $cls($mode) . '>' . esc_html($text) . '</div>';
     }
 
     /**
@@ -1017,9 +1063,10 @@ final class Shortcode
      * @param string $color CSS color value for the bar background fill (default '#fff').
      * @return string Inline SVG string.
      */
-    private function audioPlayBarSvg(string $color = '#fff'): string
+    private function audioPlayBarSvg(string $color = '#fff', bool $noStyling = false): string
     {
-        return '<svg xmlns="http://www.w3.org/2000/svg" id="audio_play_bar" class="audio-play-bar" data-name="Layer 1" viewBox="0 0 453 45"><defs><style>.pb-2{fill:#231f20}.pb-3{fill:none;stroke:#231f20;stroke-width:3px}</style></defs><rect style="fill:' . esc_attr($color) . '" width="453" height="45"></rect><polygon class="pb-2" points="42.99 22 17.01 7 17.01 37 42.99 22"></polygon><line class="pb-3" x1="52" y1="9" x2="52" y2="36"></line><line class="pb-3" x1="58" y1="9" x2="58" y2="36"></line><line class="pb-3" x1="64" y1="9" x2="64" y2="36"></line><line class="pb-3" x1="70" y1="9" x2="70" y2="36"></line><line class="pb-3" x1="76" y1="9" x2="76" y2="36"></line><line class="pb-3" x1="82" y1="9" x2="82" y2="36"></line><line class="pb-3" x1="88" y1="9" x2="88" y2="36"></line><line class="pb-3" x1="94" y1="9" x2="94" y2="36"></line><line class="pb-3" x1="100" y1="9" x2="100" y2="36"></line><line class="pb-3" x1="106" y1="9" x2="106" y2="36"></line><line class="pb-3" x1="112" y1="9" x2="112" y2="36"></line><line class="pb-3" x1="118" y1="9" x2="118" y2="36"></line><line class="pb-3" x1="124" y1="9" x2="124" y2="36"></line><line class="pb-3" x1="130" y1="9" x2="130" y2="36"></line><line class="pb-3" x1="136" y1="9" x2="136" y2="36"></line><line class="pb-3" x1="142" y1="9" x2="142" y2="36"></line><line class="pb-3" x1="148" y1="9" x2="148" y2="36"></line><line class="pb-3" x1="154" y1="9" x2="154" y2="36"></line><line class="pb-3" x1="160" y1="9" x2="160" y2="36"></line><line class="pb-3" x1="166" y1="9" x2="166" y2="36"></line><line class="pb-3" x1="172" y1="9" x2="172" y2="36"></line><line class="pb-3" x1="178" y1="9" x2="178" y2="36"></line><line class="pb-3" x1="184" y1="9" x2="184" y2="36"></line><line class="pb-3" x1="190" y1="9" x2="190" y2="36"></line><line class="pb-3" x1="196" y1="9" x2="196" y2="36"></line><line class="pb-3" x1="202" y1="9" x2="202" y2="36"></line><line class="pb-3" x1="208" y1="9" x2="208" y2="36"></line><line class="pb-3" x1="214" y1="9" x2="214" y2="36"></line><line class="pb-3" x1="220" y1="9" x2="220" y2="36"></line><line class="pb-3" x1="226" y1="9" x2="226" y2="36"></line><line class="pb-3" x1="232" y1="9" x2="232" y2="36"></line><line class="pb-3" x1="238" y1="9" x2="238" y2="36"></line><line class="pb-3" x1="244" y1="9" x2="244" y2="36"></line><line class="pb-3" x1="250" y1="9" x2="250" y2="36"></line><line class="pb-3" x1="256" y1="9" x2="256" y2="36"></line><line class="pb-3" x1="262" y1="9" x2="262" y2="36"></line><line class="pb-3" x1="268" y1="9" x2="268" y2="36"></line><line class="pb-3" x1="274" y1="9" x2="274" y2="36"></line><line class="pb-3" x1="280" y1="9" x2="280" y2="36"></line><line class="pb-3" x1="286" y1="9" x2="286" y2="36"></line><line class="pb-3" x1="292" y1="9" x2="292" y2="36"></line><line class="pb-3" x1="298" y1="9" x2="298" y2="36"></line><line class="pb-3" x1="304" y1="9" x2="304" y2="36"></line><line class="pb-3" x1="310" y1="9" x2="310" y2="36"></line><line class="pb-3" x1="316" y1="9" x2="316" y2="36"></line><line class="pb-3" x1="322" y1="9" x2="322" y2="36"></line><line class="pb-3" x1="328" y1="9" x2="328" y2="36"></line><line class="pb-3" x1="334" y1="9" x2="334" y2="36"></line><line class="pb-3" x1="340" y1="9" x2="340" y2="36"></line><line class="pb-3" x1="346" y1="9" x2="346" y2="36"></line><line class="pb-3" x1="352" y1="9" x2="352" y2="36"></line><line class="pb-3" x1="358" y1="9" x2="358" y2="36"></line><line class="pb-3" x1="364" y1="9" x2="364" y2="36"></line><line class="pb-3" x1="370" y1="9" x2="370" y2="36"></line><line class="pb-3" x1="376" y1="9" x2="376" y2="36"></line><line class="pb-3" x1="382" y1="9" x2="382" y2="36"></line><line class="pb-3" x1="388" y1="9" x2="388" y2="36"></line><line class="pb-3" x1="394" y1="9" x2="394" y2="36"></line><line class="pb-3" x1="400" y1="9" x2="400" y2="36"></line><line class="pb-3" x1="406" y1="9" x2="406" y2="36"></line><line class="pb-3" x1="412" y1="9" x2="412" y2="36"></line><line class="pb-3" x1="418" y1="9" x2="418" y2="36"></line><line class="pb-3" x1="424" y1="9" x2="424" y2="36"></line><line class="pb-3" x1="430" y1="9" x2="430" y2="36"></line><line class="pb-3" x1="436" y1="9" x2="436" y2="36"></line></svg>';
+        $svgClass = $noStyling ? '' : ' class="audio-play-bar"';
+        return '<svg xmlns="http://www.w3.org/2000/svg" id="audio_play_bar"' . $svgClass . ' data-name="Layer 1" viewBox="0 0 453 45"><defs><style>.pb-2{fill:#231f20}.pb-3{fill:none;stroke:#231f20;stroke-width:3px}</style></defs><rect style="fill:' . esc_attr($color) . '" width="453" height="45"></rect><polygon class="pb-2" points="42.99 22 17.01 7 17.01 37 42.99 22"></polygon><line class="pb-3" x1="52" y1="9" x2="52" y2="36"></line><line class="pb-3" x1="58" y1="9" x2="58" y2="36"></line><line class="pb-3" x1="64" y1="9" x2="64" y2="36"></line><line class="pb-3" x1="70" y1="9" x2="70" y2="36"></line><line class="pb-3" x1="76" y1="9" x2="76" y2="36"></line><line class="pb-3" x1="82" y1="9" x2="82" y2="36"></line><line class="pb-3" x1="88" y1="9" x2="88" y2="36"></line><line class="pb-3" x1="94" y1="9" x2="94" y2="36"></line><line class="pb-3" x1="100" y1="9" x2="100" y2="36"></line><line class="pb-3" x1="106" y1="9" x2="106" y2="36"></line><line class="pb-3" x1="112" y1="9" x2="112" y2="36"></line><line class="pb-3" x1="118" y1="9" x2="118" y2="36"></line><line class="pb-3" x1="124" y1="9" x2="124" y2="36"></line><line class="pb-3" x1="130" y1="9" x2="130" y2="36"></line><line class="pb-3" x1="136" y1="9" x2="136" y2="36"></line><line class="pb-3" x1="142" y1="9" x2="142" y2="36"></line><line class="pb-3" x1="148" y1="9" x2="148" y2="36"></line><line class="pb-3" x1="154" y1="9" x2="154" y2="36"></line><line class="pb-3" x1="160" y1="9" x2="160" y2="36"></line><line class="pb-3" x1="166" y1="9" x2="166" y2="36"></line><line class="pb-3" x1="172" y1="9" x2="172" y2="36"></line><line class="pb-3" x1="178" y1="9" x2="178" y2="36"></line><line class="pb-3" x1="184" y1="9" x2="184" y2="36"></line><line class="pb-3" x1="190" y1="9" x2="190" y2="36"></line><line class="pb-3" x1="196" y1="9" x2="196" y2="36"></line><line class="pb-3" x1="202" y1="9" x2="202" y2="36"></line><line class="pb-3" x1="208" y1="9" x2="208" y2="36"></line><line class="pb-3" x1="214" y1="9" x2="214" y2="36"></line><line class="pb-3" x1="220" y1="9" x2="220" y2="36"></line><line class="pb-3" x1="226" y1="9" x2="226" y2="36"></line><line class="pb-3" x1="232" y1="9" x2="232" y2="36"></line><line class="pb-3" x1="238" y1="9" x2="238" y2="36"></line><line class="pb-3" x1="244" y1="9" x2="244" y2="36"></line><line class="pb-3" x1="250" y1="9" x2="250" y2="36"></line><line class="pb-3" x1="256" y1="9" x2="256" y2="36"></line><line class="pb-3" x1="262" y1="9" x2="262" y2="36"></line><line class="pb-3" x1="268" y1="9" x2="268" y2="36"></line><line class="pb-3" x1="274" y1="9" x2="274" y2="36"></line><line class="pb-3" x1="280" y1="9" x2="280" y2="36"></line><line class="pb-3" x1="286" y1="9" x2="286" y2="36"></line><line class="pb-3" x1="292" y1="9" x2="292" y2="36"></line><line class="pb-3" x1="298" y1="9" x2="298" y2="36"></line><line class="pb-3" x1="304" y1="9" x2="304" y2="36"></line><line class="pb-3" x1="310" y1="9" x2="310" y2="36"></line><line class="pb-3" x1="316" y1="9" x2="316" y2="36"></line><line class="pb-3" x1="322" y1="9" x2="322" y2="36"></line><line class="pb-3" x1="328" y1="9" x2="328" y2="36"></line><line class="pb-3" x1="334" y1="9" x2="334" y2="36"></line><line class="pb-3" x1="340" y1="9" x2="340" y2="36"></line><line class="pb-3" x1="346" y1="9" x2="346" y2="36"></line><line class="pb-3" x1="352" y1="9" x2="352" y2="36"></line><line class="pb-3" x1="358" y1="9" x2="358" y2="36"></line><line class="pb-3" x1="364" y1="9" x2="364" y2="36"></line><line class="pb-3" x1="370" y1="9" x2="370" y2="36"></line><line class="pb-3" x1="376" y1="9" x2="376" y2="36"></line><line class="pb-3" x1="382" y1="9" x2="382" y2="36"></line><line class="pb-3" x1="388" y1="9" x2="388" y2="36"></line><line class="pb-3" x1="394" y1="9" x2="394" y2="36"></line><line class="pb-3" x1="400" y1="9" x2="400" y2="36"></line><line class="pb-3" x1="406" y1="9" x2="406" y2="36"></line><line class="pb-3" x1="412" y1="9" x2="412" y2="36"></line><line class="pb-3" x1="418" y1="9" x2="418" y2="36"></line><line class="pb-3" x1="424" y1="9" x2="424" y2="36"></line><line class="pb-3" x1="430" y1="9" x2="430" y2="36"></line><line class="pb-3" x1="436" y1="9" x2="436" y2="36"></line></svg>';
     }
 
     /**
@@ -1054,8 +1101,8 @@ final class Shortcode
     {
         $v = strtolower(trim($value));
         return match($v) {
-            'title', 'description' => $v,
-            default                => '',
+            'title', 'description', 'both' => $v,
+            default                        => '',
         };
     }
 
@@ -1324,5 +1371,305 @@ final class Shortcode
 
         return preg_match('/^\{\{\s*[a-z0-9_-]+\s*\}\}$/i', $trimmed) === 1
             || preg_match('/^\[media-api-widget\s+field=(["\'])[a-z0-9_-]+\1\s*\]$/i', $trimmed) === 1;
+    }
+
+    /**
+     * Renders the search bar for a user-searchable grid.
+     *
+     * Associates with a [media-api-widget-render] grid that has
+     * multiplegridusersearch="true" on the same page, matching by
+     * playlist_name + media_platform. The JS binds them together.
+     *
+     * Usage: [media-api-widget-grid-search playlist_name="my_show" media_platform="youtube"]
+     *
+     * @param array<string,mixed> $atts Shortcode attributes.
+     * @return string HTML search bar string, or ''.
+     */
+    public function renderGridSearchShortcode($atts = []): string
+    {
+        $atts = is_array($atts) ? $atts : [];
+        $atts = shortcode_atts([
+            'playlist_name'  => '',
+            'media_platform' => 'youtube',
+            'placeholder'    => 'Search...',
+        ], $atts, 'media-api-widget-grid-search');
+
+        $playlistName = sanitize_key((string) $atts['playlist_name']);
+        $mediaType    = sanitize_key((string) $atts['media_platform']);
+        $placeholder  = sanitize_text_field((string) $atts['placeholder']);
+
+        if ($playlistName === '' || $mediaType === '') {
+            return '';
+        }
+
+        $gridId = $playlistName . '_' . $mediaType;
+
+        return
+            '<div class="maw-grid-search-bar" data-maw-for="' . esc_attr($gridId) . '">' .
+                '<input type="text" class="maw-search-input" placeholder="' . esc_attr($placeholder) . '" aria-label="' . esc_attr__('Search', 'media-api-widget') . '">' .
+                '<select class="maw-search-by" aria-label="' . esc_attr__('Search by', 'media-api-widget') . '">' .
+                    '<option value="title">Title</option>' .
+                    '<option value="description">Description</option>' .
+                '</select>' .
+            '</div>';
+    }
+
+    /**
+     * AJAX handler for the user-searchable paginated grid.
+     *
+     * Reads the grid configuration stored in a transient by renderUserSearchGrid(),
+     * applies the user search term and pagination, renders the grid items and
+     * pagination HTML server-side, and returns them as JSON.
+     *
+     * Accepts POST fields: nonce, playlist_name, media_platform, grid_key,
+     * search_term, search_by (title|description), page, per_page.
+     *
+     * @return void Outputs JSON and exits via wp_send_json_*.
+     */
+    public function handleGridSearchAjax(): void
+    {
+        if (!check_ajax_referer('maw_grid_search', 'nonce', false)) {
+            wp_send_json_error(['message' => 'Invalid nonce.'], 403);
+            return;
+        }
+
+        $playlistName = sanitize_key((string) wp_unslash($_POST['playlist_name'] ?? ''));
+        $mediaType    = sanitize_key((string) wp_unslash($_POST['media_platform'] ?? ''));
+        $gridKey      = preg_replace('/[^a-f0-9]/', '', (string) ($_POST['grid_key'] ?? ''));
+        $searchTerm   = sanitize_text_field((string) wp_unslash($_POST['search_term'] ?? ''));
+        $searchBy     = in_array((string) ($_POST['search_by'] ?? ''), ['title', 'description'], true)
+                            ? (string) $_POST['search_by'] : 'title';
+        $page         = max(1, (int) ($_POST['page'] ?? 1));
+        $perPage      = max(1, min(100, (int) ($_POST['per_page'] ?? 12)));
+
+        if ($playlistName === '' || $mediaType === '' || $gridKey === '') {
+            wp_send_json_error(['message' => 'Missing required parameters.'], 400);
+            return;
+        }
+
+        $gridConfig = get_transient('maw_grid_' . $gridKey);
+        if (!is_array($gridConfig)) {
+            wp_send_json_error(['message' => 'Grid configuration not found. Please reload the page.'], 404);
+            return;
+        }
+
+        $settings         = is_array($gridConfig['settings'] ?? null) ? $gridConfig['settings'] : [];
+        $gap              = sanitize_text_field((string) ($gridConfig['gap'] ?? '48px'));
+        $minsize          = sanitize_text_field((string) ($gridConfig['minsize'] ?? '400px'));
+        $multiplegridtext = $this->sanitizeMultipleGridText((string) ($gridConfig['multiplegridtext'] ?? ''));
+        $episodeRange     = sanitize_text_field((string) ($gridConfig['episodeRange'] ?? ''));
+        $showall          = (bool) ($gridConfig['showall'] ?? false);
+        $noresults        = sanitize_text_field((string) ($gridConfig['noresults'] ?? ''));
+        $noStyling        = (bool) ($gridConfig['noStyling'] ?? false);
+        $settings['noStyling'] = $noStyling;
+
+        $mediaConfig = $this->findMediaConfig($playlistName, $mediaType);
+        if ($mediaConfig === null) {
+            wp_send_json_error(['message' => 'Playlist not found.'], 404);
+            return;
+        }
+
+        $podcastPlatform = sanitize_key((string) ($mediaConfig['podcast_platform'] ?? 'custom'));
+        $mediaData       = $this->readCachedMediaData($playlistName, $mediaType, $mediaConfig);
+        if ($mediaType === 'podcast' && $podcastPlatform === 'embed' && $mediaData === null) {
+            $mediaData = [];
+        }
+        if ($mediaData === null) {
+            wp_send_json_error(['message' => 'No cached data found. Please try reloading the page.'], 404);
+            return;
+        }
+
+        $renderData = $this->normalizeRenderData($mediaData, $mediaType, $podcastPlatform, '', '');
+
+        if (!$showall && preg_match('/^\s*(\d+)\s*-\s*(\d+)\s*$/', $episodeRange, $m) === 1) {
+            $min        = (int) $m[1];
+            $max        = (int) $m[2];
+            $renderData = array_values(array_filter($renderData, static function ($item) use ($min, $max) {
+                $episode = isset($item['episode']) ? (int) $item['episode'] : -1;
+                return $episode >= $min && $episode <= $max;
+            }));
+        }
+
+        if ($searchTerm !== '') {
+            $term       = $searchTerm;
+            $by         = $searchBy;
+            $renderData = array_values(array_filter($renderData, static function ($item) use ($term, $by) {
+                $field = $by === 'description' ? (string) ($item['description'] ?? '') : (string) ($item['title'] ?? '');
+                return stripos($field, $term) !== false;
+            }));
+        }
+
+        $total      = count($renderData);
+        $totalPages = max(1, (int) ceil($total / $perPage));
+        $offset     = ($page - 1) * $perPage;
+        $pageData   = array_slice($renderData, $offset, $perPage);
+
+        $gridSettings = $settings;
+        if ($multiplegridtext !== '') {
+            $gridSettings['multipleGridText'] = $multiplegridtext;
+        }
+
+        $gridHtml = '';
+        foreach ($pageData as $row) {
+            $gridHtml .= $this->renderMediaItem($row, $gridSettings, false, $playlistName, $mediaType);
+        }
+
+        if ($gridHtml === '') {
+            $gridHtml = $noresults !== ''
+                ? '<p class="maw-grid-noresults">' . esc_html($noresults) . '</p>'
+                : '<h3 class="media-api-widget-err-msg">No ' . esc_html($mediaType) . ' items found.</h3>';
+        }
+
+        $layoutClass     = $noStyling ? '' : ' class="media_items_multiple_grid_layout"';
+        $gridWrapperHtml =
+            '<div' . $layoutClass . ' style="gap: ' . esc_attr($gap) . '; grid-template-columns: repeat(auto-fill, minmax(min(100%, ' . esc_attr($minsize) . '), 1fr));">' .
+                $gridHtml .
+            '</div>';
+
+        wp_send_json_success([
+            'html'        => $gridWrapperHtml,
+            'pagination'  => $this->renderPaginationHtml($page, $totalPages),
+            'total'       => $total,
+            'page'        => $page,
+            'total_pages' => $totalPages,
+        ]);
+    }
+
+    /**
+     * Renders the initial paginated wrapper for a user-searchable grid.
+     *
+     * Stores the render settings in a transient (keyed by a short hash) so the
+     * AJAX handler can retrieve them without trusting client-supplied data.
+     * Outputs page 1 of the base-filtered results, the pagination controls,
+     * and the wrapper div with data attributes the front-end JS reads.
+     *
+     * @param array<int,array<string,mixed>> $renderData   Normalized item array.
+     * @param array<string,mixed>            $itemData     Resolved shortcode item options.
+     * @param array<string,mixed>            $settings     Render settings from buildRenderSettings().
+     * @param string                         $playlistName Playlist_name slug.
+     * @param string                         $mediaType    'youtube' or 'podcast'.
+     * @return string HTML wrapper string.
+     */
+    private function renderUserSearchGrid(array $renderData, array $itemData, array $settings, string $playlistName, string $mediaType): string
+    {
+        $perPage      = (int) $itemData['multiplegridperpage'];
+        $gap          = (string) $itemData['multiplegridgap'];
+        $minsize      = (string) $itemData['multiplegridminsize'];
+        $gridtext     = (string) $itemData['multiplegridtext'];
+        $episodeRange = (string) $itemData['multiplegridepisoderange'];
+        $showall      = (bool) $itemData['multiplegridshowall'];
+        $noresults    = (string) $itemData['noresults'];
+        $noStyling    = (bool) $itemData['nostyling'];
+        $gridId       = $playlistName . '_' . $mediaType;
+
+        $gridSettings = $settings;
+        if ($gridtext !== '') {
+            $gridSettings['multipleGridText'] = $gridtext;
+        }
+
+        $gridKey = substr(md5(wp_json_encode($gridSettings) . $playlistName . $mediaType . $gap . $minsize . $episodeRange . (string) $perPage), 0, 16);
+        set_transient('maw_grid_' . $gridKey, [
+            'settings'         => $gridSettings,
+            'gap'              => $gap,
+            'minsize'          => $minsize,
+            'multiplegridtext' => $gridtext,
+            'episodeRange'     => $episodeRange,
+            'showall'          => $showall,
+            'noresults'        => $noresults,
+            'noStyling'        => $noStyling,
+        ], 86400);
+
+        $filteredData = $renderData;
+        if (!$showall && preg_match('/^\s*(\d+)\s*-\s*(\d+)\s*$/', $episodeRange, $m) === 1) {
+            $min          = (int) $m[1];
+            $max          = (int) $m[2];
+            $filteredData = array_values(array_filter($renderData, static function ($item) use ($min, $max) {
+                $episode = isset($item['episode']) ? (int) $item['episode'] : -1;
+                return $episode >= $min && $episode <= $max;
+            }));
+        }
+
+        $total      = count($filteredData);
+        $totalPages = max(1, (int) ceil($total / $perPage));
+        $pageData   = array_slice($filteredData, 0, $perPage);
+
+        $gridHtml = '';
+        foreach ($pageData as $row) {
+            $gridHtml .= $this->renderMediaItem($row, $gridSettings, false, $playlistName, $mediaType);
+        }
+
+        if ($gridHtml === '') {
+            $gridHtml = $noresults !== ''
+                ? '<p class="maw-grid-noresults">' . esc_html($noresults) . '</p>'
+                : '<h3 class="media-api-widget-err-msg">No ' . esc_html($mediaType) . ' items found in playlist based upon search parameters provided.</h3>';
+        }
+
+        $layoutClass    = $noStyling ? '' : ' class="media_items_multiple_grid_layout"';
+        $gridLayoutHtml =
+            '<div' . $layoutClass . ' style="gap: ' . esc_attr($gap) . '; grid-template-columns: repeat(auto-fill, minmax(min(100%, ' . esc_attr($minsize) . '), 1fr));">' .
+                $gridHtml .
+            '</div>';
+
+        return
+            '<div class="maw-grid-search-wrapper"' .
+                ' data-maw-grid-id="' . esc_attr($gridId) . '"' .
+                ' data-maw-playlist="' . esc_attr($playlistName) . '"' .
+                ' data-maw-mediatype="' . esc_attr($mediaType) . '"' .
+                ' data-maw-perpage="' . esc_attr((string) $perPage) . '"' .
+                ' data-maw-grid-key="' . esc_attr($gridKey) . '"' .
+            '>' .
+                '<div class="maw-grid-items">' . $gridLayoutHtml . '</div>' .
+                '<div class="maw-grid-pagination">' . $this->renderPaginationHtml(1, $totalPages) . '</div>' .
+            '</div>';
+    }
+
+    /**
+     * Renders prev/page-number/next pagination button HTML.
+     *
+     * Returns an empty string when $totalPages <= 1. Shows up to 5 page
+     * numbers centred on the current page, with ellipsis for gaps, and
+     * always includes the first and last page buttons.
+     *
+     * @param int $currentPage Current 1-based page number.
+     * @param int $totalPages  Total number of pages.
+     * @return string HTML string of pagination buttons.
+     */
+    private function renderPaginationHtml(int $currentPage, int $totalPages): string
+    {
+        if ($totalPages <= 1) {
+            return '';
+        }
+
+        $html = '';
+
+        $html .= '<button class="maw-page-btn maw-page-prev" data-page="' . esc_attr((string) max(1, $currentPage - 1)) . '"' . ($currentPage <= 1 ? ' disabled' : '') . '>&#8249; Prev</button>';
+
+        $range = 2;
+        $start = max(1, $currentPage - $range);
+        $end   = min($totalPages, $currentPage + $range);
+
+        if ($start > 1) {
+            $html .= '<button class="maw-page-btn maw-page-num" data-page="1">1</button>';
+            if ($start > 2) {
+                $html .= '<span class="maw-page-ellipsis">&hellip;</span>';
+            }
+        }
+
+        for ($i = $start; $i <= $end; $i++) {
+            $active   = $i === $currentPage ? ' active' : '';
+            $disabled = $i === $currentPage ? ' disabled' : '';
+            $html    .= '<button class="maw-page-btn maw-page-num' . $active . '" data-page="' . esc_attr((string) $i) . '"' . $disabled . '>' . esc_html((string) $i) . '</button>';
+        }
+
+        if ($end < $totalPages) {
+            if ($end < $totalPages - 1) {
+                $html .= '<span class="maw-page-ellipsis">&hellip;</span>';
+            }
+            $html .= '<button class="maw-page-btn maw-page-num" data-page="' . esc_attr((string) $totalPages) . '">' . esc_html((string) $totalPages) . '</button>';
+        }
+
+        $html .= '<button class="maw-page-btn maw-page-next" data-page="' . esc_attr((string) min($totalPages, $currentPage + 1)) . '"' . ($currentPage >= $totalPages ? ' disabled' : '') . '>Next &#8250;</button>';
+
+        return $html;
     }
 }

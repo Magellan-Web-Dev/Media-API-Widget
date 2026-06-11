@@ -43,5 +43,9 @@ final class Assets
 
         wp_enqueue_style('maw-media-api-widget', MAW_PLUGIN_URL . 'assets/media-api-widget.css', [], MAW_PLUGIN_VERSION);
         wp_enqueue_script('maw-media-api-widget', MAW_PLUGIN_URL . 'assets/media-api-widget.js', [], MAW_PLUGIN_VERSION, true);
+        wp_localize_script('maw-media-api-widget', 'mawGridSearchData', [
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'nonce'   => wp_create_nonce('maw_grid_search'),
+        ]);
     }
 }

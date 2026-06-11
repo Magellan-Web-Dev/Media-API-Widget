@@ -617,3 +617,103 @@
             }
 
             /* -- END - Lightbox Styling -- */
+
+            /* -- START - Grid Search & Pagination -- */
+
+            .maw-grid-search-wrapper {
+                position: relative;
+            }
+
+            .maw-grid-search-wrapper.loading .maw-grid-items,
+            .maw-grid-search-wrapper.loading .maw-grid-pagination {
+                opacity: 0.4;
+                pointer-events: none;
+                transition: opacity 0.2s;
+            }
+
+            .maw-grid-search-wrapper.loading::after {
+                content: '';
+                position: absolute;
+                inset: 0;
+                cursor: wait;
+                z-index: 1;
+            }
+
+            .maw-grid-pagination {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                justify-content: center;
+                align-items: center;
+                margin-top: 24px;
+            }
+
+            .maw-page-btn {
+                padding: 8px 14px;
+                border: 1px solid currentColor;
+                background: transparent;
+                cursor: pointer;
+                font-family: inherit;
+                font-size: 1rem;
+                line-height: 1;
+                border-radius: 4px;
+                transition: opacity 0.2s;
+                color: inherit;
+            }
+
+            .maw-page-btn:hover:not(:disabled):not(.active) {
+                opacity: 0.65;
+            }
+
+            .maw-page-btn:disabled {
+                opacity: 0.3;
+                cursor: default;
+            }
+
+            .maw-page-btn.active {
+                font-weight: 700;
+                cursor: default;
+            }
+
+            .maw-page-ellipsis {
+                padding: 8px 4px;
+                font-family: inherit;
+                color: inherit;
+            }
+
+            .maw-grid-search-bar {
+                display: flex;
+                gap: 8px;
+                align-items: stretch;
+                flex-wrap: wrap;
+                margin-bottom: 16px;
+            }
+
+            .maw-search-input {
+                flex: 1 1 200px;
+                padding: 8px 12px;
+                font-family: inherit;
+                font-size: 1rem;
+                border: 1px solid currentColor;
+                background: transparent;
+                color: inherit;
+                box-sizing: border-box;
+                min-width: 0;
+            }
+
+            .maw-search-input::placeholder {
+                color: inherit;
+                opacity: 0.5;
+            }
+
+            .maw-search-by {
+                padding: 8px 12px;
+                font-family: inherit;
+                font-size: 1rem;
+                border: 1px solid currentColor;
+                background: transparent;
+                color: inherit;
+                cursor: pointer;
+            }
+
+            /* -- END - Grid Search & Pagination -- */

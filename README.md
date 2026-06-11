@@ -21,6 +21,7 @@ A WordPress plugin that syncs YouTube playlists and podcast RSS feeds to the fro
    - [`[media-api-widget]` — Field Output](#media-api-widget--field-output)
    - [`[media-api-widget-render]` — Media Item](#media-api-widget-render--media-item)
    - [`[media-api-podcast-player]` — Podcast Player Embed](#media-api-podcast-player--podcast-player-embed)
+   - [`[media-api-widget-grid-search]` — Grid Search Bar](#media-api-widget-grid-search--grid-search-bar)
 5. [Shortcode Attribute Reference](#shortcode-attribute-reference)
 6. [Admin Shortcode Field References (Dynamic Values)](#admin-shortcode-field-references-dynamic-values)
 7. [Podcast Platform Support](#podcast-platform-support)
@@ -243,6 +244,29 @@ Renders the custom podcast player as an inline `<iframe>`. This is the recommend
 
 ---
 
+### `[media-api-widget-grid-search]` — Grid Search Bar
+
+Renders a search bar that is linked to a `[media-api-widget-render]` grid running in `multiplegridusersearch="true"` mode. The bar is matched to the correct grid by `playlist_name` + `media_platform`.
+
+The search bar contains a text input and a dropdown that lets users choose whether to search by **title** or **description**.
+
+**Attributes:**
+
+| Attribute | Required | Default | Description |
+|---|---|---|---|
+| `playlist_name` | Yes | — | Must match the `playlist_name` on the target grid shortcode. |
+| `media_platform` | Yes | — | Must match the `media_platform` on the target grid shortcode. |
+| `placeholder` | No | `Search...` | Placeholder text displayed inside the search input. |
+
+**Example:**
+```
+[media-api-widget-grid-search playlist_name="my_show" media_platform="youtube"]
+```
+
+Place this shortcode anywhere on the page — above, below, or beside the grid. It does not need to be adjacent to the grid shortcode.
+
+---
+
 ## Shortcode Attribute Reference
 
 ### Selection Attributes (apply to `[media-api-widget-render]` and `[media-api-podcast-player]`)
@@ -296,7 +320,11 @@ Enable grid mode to display multiple media items in a responsive CSS grid.
 | `multiplegridepisoderange` | _(none)_ | Show only items whose episode number falls in a range. Format: `1-10`. Overrides search and limit. |
 | `multiplegridgap` | `48px` | CSS `gap` value for the grid. |
 | `multiplegridminsize` | `400px` | Minimum column width in the `auto-fill` grid. |
-| `multiplegridtext` | _(none)_ | Show text below each grid item: `title` or `description`. YouTube only. |
+| `multiplegridtext` | _(none)_ | Show text below each grid item: `title`, `description`, or `both`. YouTube only. |
+| `multiplegridusersearch` | `false` | Set to `true` to enable the user-searchable + paginated grid mode. See [Grid Search & Pagination](#grid-search--pagination). |
+| `multiplegridperpage` | `12` | Max items per page when `multiplegridusersearch="true"`. |
+| `noresults` | _(none)_ | Text shown when a user search yields no results (user-search grid only). Falls back to a generic message when empty. |
+| `nostyling` | `false` | Set to `true` to suppress all plugin CSS class names from the rendered output. Data attributes used by the lightbox JS are unaffected. |
 
 **Example — filtered grid of episodes 1–6 with titles:**
 ```
@@ -310,6 +338,37 @@ Enable grid mode to display multiple media items in a responsive CSS grid.
     multiplegridminsize="300px"
 ]
 ```
+
+---
+
+### Grid Search & Pagination
+
+When `multiplegridusersearch="true"` is set on `[media-api-widget-render]`, the grid is rendered in an interactive mode that supports AJAX-powered user search and pagination. A companion `[media-api-widget-grid-search]` shortcode renders the search bar, which is linked to the grid by `playlist_name` + `media_platform`.
+
+**How it works:**
+- The initial page is server-rendered — no AJAX on first load.
+- Typing in the search bar triggers a debounced (400 ms) AJAX request that filters and re-renders the grid items.
+- Clicking Prev / page number / Next buttons also fires an AJAX request.
+- While any AJAX request is in flight, the wrapper element receives a `loading` CSS class (grid items and pagination become semi-transparent and non-interactive).
+- The `[media-api-widget-grid-search]` shortcode can be placed anywhere on the page — it links to the matching grid via `playlist_name` + `media_platform`.
+
+**Full example:**
+
+```
+[media-api-widget-grid-search playlist_name="my_show" media_platform="youtube"]
+
+[media-api-widget-render
+    playlist_name="my_show"
+    media_platform="youtube"
+    multiplegridusersearch="true"
+    multiplegridperpage="12"
+    multiplegridtext="both"
+    multiplegridgap="32px"
+    multiplegridminsize="300px"
+]
+```
+
+> `multiplegridusersearch` and `multiplegrid` are mutually exclusive — when `multiplegridusersearch="true"`, the standard static grid path is bypassed entirely. All other existing grid attributes (`multiplegridgap`, `multiplegridminsize`, `multiplegridtext`, `multiplegridepisoderange`, etc.) continue to work as filters and display options within this mode.
 
 ---
 

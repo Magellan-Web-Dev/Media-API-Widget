@@ -82,10 +82,20 @@
 
 	            function sanitize_multiple_grid_text(value) {
 	                const normalized = String(value ?? "").trim().toLowerCase();
-	                return normalized === "title" || normalized === "description" ? normalized : "";
+	                return normalized === "title" || normalized === "description" || normalized === "both" ? normalized : "";
 	            }
 
 	            function render_multiple_grid_text(item, mode) {
+	                if (mode === "both") {
+	                    const title = String(item?.title ?? "").trim();
+	                    const description = String(item?.description ?? "").trim();
+	                    if (!title && !description) return "";
+	                    let html = "";
+	                    if (title) html += `<div class="media-item-multiple-grid-text media-item-multiple-grid-text-title">${escape_html(title)}</div>`;
+	                    if (description) html += `<div class="media-item-multiple-grid-text media-item-multiple-grid-text-description">${escape_html(description)}</div>`;
+	                    return html;
+	                }
+
 	                if (mode !== "title" && mode !== "description") {
 	                    return "";
 	                }
@@ -1273,3 +1283,108 @@
                         }
                     });
                 }
+
+// -- Grid Search & Pagination --
+
+(function () {
+    "use strict";
+
+    function initMawGridSearch() {
+        document.querySelectorAll(".maw-grid-search-wrapper").forEach(function (wrapper) {
+            var gridId       = wrapper.dataset.mawGridId;
+            var playlistName = wrapper.dataset.mawPlaylist;
+            var mediaType    = wrapper.dataset.mawMediatype;
+            var perPage      = parseInt(wrapper.dataset.mawPerpage, 10) || 12;
+            var gridKey      = wrapper.dataset.mawGridKey;
+
+            if (!playlistName || !mediaType || !gridKey) {
+                return;
+            }
+
+            var searchBar    = document.querySelector(".maw-grid-search-bar[data-maw-for=\"" + gridId + "\"]");
+            var gridItemsEl  = wrapper.querySelector(".maw-grid-items");
+            var paginationEl = wrapper.querySelector(".maw-grid-pagination");
+
+            var currentPage     = 1;
+            var currentSearch   = "";
+            var currentSearchBy = "title";
+            var debounceTimer   = null;
+
+            function doRequest(page) {
+                currentPage = page || 1;
+                wrapper.classList.add("loading");
+
+                var formData = new FormData();
+                formData.append("action",        "maw_grid_search");
+                formData.append("nonce",         mawGridSearchData.nonce);
+                formData.append("playlist_name", playlistName);
+                formData.append("media_platform",mediaType);
+                formData.append("grid_key",      gridKey);
+                formData.append("search_term",   currentSearch);
+                formData.append("search_by",     currentSearchBy);
+                formData.append("page",          currentPage);
+                formData.append("per_page",      perPage);
+
+                fetch(mawGridSearchData.ajaxUrl, { method: "POST", body: formData })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (data.success) {
+                            if (gridItemsEl)  gridItemsEl.innerHTML  = data.data.html;
+                            if (paginationEl) paginationEl.innerHTML = data.data.pagination;
+                            bindPaginationButtons();
+                        }
+                        wrapper.classList.remove("loading");
+                    })
+                    .catch(function () {
+                        wrapper.classList.remove("loading");
+                    });
+            }
+
+            function bindPaginationButtons() {
+                if (!paginationEl) { return; }
+                paginationEl.querySelectorAll(".maw-page-btn").forEach(function (btn) {
+                    btn.addEventListener("click", function () {
+                        if (btn.disabled) { return; }
+                        var page = parseInt(btn.dataset.page, 10);
+                        if (page && page !== currentPage) {
+                            doRequest(page);
+                        }
+                    });
+                });
+            }
+
+            bindPaginationButtons();
+
+            if (searchBar) {
+                var input  = searchBar.querySelector(".maw-search-input");
+                var select = searchBar.querySelector(".maw-search-by");
+
+                if (input) {
+                    input.addEventListener("input", function () {
+                        clearTimeout(debounceTimer);
+                        debounceTimer = setTimeout(function () {
+                            currentSearch   = input.value;
+                            currentSearchBy = select ? select.value : "title";
+                            doRequest(1);
+                        }, 400);
+                    });
+                }
+
+                if (select) {
+                    select.addEventListener("change", function () {
+                        currentSearchBy = select.value;
+                        if (currentSearch !== "") {
+                            doRequest(1);
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initMawGridSearch);
+    } else {
+        initMawGridSearch();
+    }
+})();
