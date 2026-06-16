@@ -240,12 +240,16 @@ final class AboutPage
                 <p><strong>With a custom placeholder:</strong></p>
                 <pre class="maw-code">[media-api-widget-grid-search playlist_name="my_show" media_platform="youtube" placeholder="Search episodes..."]</pre>
 
+                <p><strong>Hide the Search By dropdown (always searches across title and description):</strong></p>
+                <pre class="maw-code">[media-api-widget-grid-search playlist_name="my_show" media_platform="youtube" searchbyenabled="false"]</pre>
+
                 <table class="widefat striped maw-table maw-about-table" style="margin-top:12px;">
                     <thead><tr><th style="width:200px;">Attribute</th><th style="width:160px;">Default</th><th>Description</th></tr></thead>
                     <tbody>
                         <tr><td><code>playlist_name</code></td><td><em>required</em></td><td>Must match the <code>playlist_name</code> on the target grid shortcode.</td></tr>
                         <tr><td><code>media_platform</code></td><td><em>required</em></td><td>Must match the <code>media_platform</code> on the target grid shortcode.</td></tr>
                         <tr><td><code>placeholder</code></td><td><code>Search...</code></td><td>Placeholder text shown inside the search input field.</td></tr>
+                        <tr><td><code>searchbyenabled</code></td><td><code>true</code></td><td>When <code>false</code>, hides the Search By dropdown and always searches across both title and description.</td></tr>
                     </tbody>
                 </table>
             </section>
@@ -363,7 +367,7 @@ final class AboutPage
                 <ul>
                     <li>The first page renders server-side — no AJAX on initial load.</li>
                     <li>Typing in the search bar fires a debounced (400 ms) AJAX request that filters and re-renders the grid.</li>
-                    <li>The search bar dropdown lets the visitor search by <strong>Title</strong> or <strong>Description</strong>.</li>
+                    <li>The search bar dropdown lets the visitor search by <strong>Any</strong> (title or description), <strong>Title</strong>, or <strong>Description</strong>. Set <code>searchbyenabled="false"</code> to hide the dropdown — the search will always match across both fields.</li>
                     <li>Clicking <strong>Prev</strong>, a page number, or <strong>Next</strong> also fires an AJAX request.</li>
                     <li>A CSS class <code>loading</code> is applied to the wrapper element while any AJAX request is in flight, making the grid semi-transparent and non-interactive.</li>
                     <li>The search bar shortcode can be placed anywhere on the page — it does not need to be adjacent to the grid.</li>

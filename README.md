@@ -249,7 +249,7 @@ Renders the custom podcast player as an inline `<iframe>`. This is the recommend
 
 Renders a search bar that is linked to a `[media-api-widget-render]` grid running in `multiplegridusersearch="true"` mode. The bar is matched to the correct grid by `playlist_name` + `media_platform`.
 
-The search bar contains a text input and a dropdown that lets users choose whether to search by **title** or **description**.
+The search bar contains a text input and a dropdown that lets users choose whether to search by **Any** (title and description), **Title**, or **Description**.
 
 **Attributes:**
 
@@ -258,10 +258,16 @@ The search bar contains a text input and a dropdown that lets users choose wheth
 | `playlist_name` | Yes | — | Must match the `playlist_name` on the target grid shortcode. |
 | `media_platform` | Yes | — | Must match the `media_platform` on the target grid shortcode. |
 | `placeholder` | No | `Search...` | Placeholder text displayed inside the search input. |
+| `searchbyenabled` | No | `true` | When `false`, hides the Search By dropdown and defaults to searching across both title and description. |
 
 **Example:**
 ```
 [media-api-widget-grid-search playlist_name="my_show" media_platform="youtube"]
+```
+
+**Example — hide the Search By dropdown:**
+```
+[media-api-widget-grid-search playlist_name="my_show" media_platform="youtube" searchbyenabled="false"]
 ```
 
 Place this shortcode anywhere on the page — above, below, or beside the grid. It does not need to be adjacent to the grid shortcode.
@@ -350,6 +356,7 @@ When `multiplegridusersearch="true"` is set on `[media-api-widget-render]`, the 
 **How it works:**
 - The initial page is server-rendered — no AJAX on first load.
 - Typing in the search bar triggers a debounced (400 ms) AJAX request that filters and re-renders the grid items.
+- The search bar dropdown lets visitors search by **Any** (matches title or description), **Title**, or **Description**. Set `searchbyenabled="false"` on the `[media-api-widget-grid-search]` shortcode to hide the dropdown — the search will always match across both fields.
 - Clicking Prev / page number / Next buttons also fires an AJAX request.
 - While any AJAX request is in flight, the wrapper element receives a `loading` CSS class (grid items and pagination become semi-transparent and non-interactive).
 - The `[media-api-widget-grid-search]` shortcode can be placed anywhere on the page — it links to the matching grid via `playlist_name` + `media_platform`.

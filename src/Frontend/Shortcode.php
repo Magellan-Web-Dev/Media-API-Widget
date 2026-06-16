@@ -1395,14 +1395,16 @@ final class Shortcode
     {
         $atts = is_array($atts) ? $atts : [];
         $atts = shortcode_atts([
-            'playlist_name'  => '',
-            'media_platform' => 'youtube',
-            'placeholder'    => 'Search...',
+            'playlist_name'   => '',
+            'media_platform'  => 'youtube',
+            'placeholder'     => 'Search...',
+            'searchbyenabled' => 'true',
         ], $atts, 'media-api-widget-grid-search');
 
-        $playlistName = sanitize_key((string) $atts['playlist_name']);
-        $mediaType    = sanitize_key((string) $atts['media_platform']);
-        $placeholder  = sanitize_text_field((string) $atts['placeholder']);
+        $playlistName    = sanitize_key((string) $atts['playlist_name']);
+        $mediaType       = sanitize_key((string) $atts['media_platform']);
+        $placeholder     = sanitize_text_field((string) $atts['placeholder']);
+        $searchByEnabled = filter_var($atts['searchbyenabled'], FILTER_VALIDATE_BOOLEAN);
 
         if ($playlistName === '' || $mediaType === '') {
             return '';
@@ -1410,13 +1412,18 @@ final class Shortcode
 
         $gridId = $playlistName . '_' . $mediaType;
 
+        $selectHtml = $searchByEnabled
+            ? '<select class="maw-search-by" aria-label="' . esc_attr__('Search by', 'media-api-widget') . '">' .
+                  '<option value="any">Any</option>' .
+                  '<option value="title">Title</option>' .
+                  '<option value="description">Description</option>' .
+              '</select>'
+            : '';
+
         return
             '<div class="maw-grid-search-bar" data-maw-for="' . esc_attr($gridId) . '">' .
                 '<input type="text" class="maw-search-input" placeholder="' . esc_attr($placeholder) . '" aria-label="' . esc_attr__('Search', 'media-api-widget') . '">' .
-                '<select class="maw-search-by" aria-label="' . esc_attr__('Search by', 'media-api-widget') . '">' .
-                    '<option value="title">Title</option>' .
-                    '<option value="description">Description</option>' .
-                '</select>' .
+                $selectHtml .
             '</div>';
     }
 
@@ -1428,7 +1435,7 @@ final class Shortcode
      * pagination HTML server-side, and returns them as JSON.
      *
      * Accepts POST fields: nonce, playlist_name, media_platform, grid_key,
-     * search_term, search_by (title|description), page, per_page.
+     * search_term, search_by (any|title|description), page, per_page.
      *
      * @return void Outputs JSON and exits via wp_send_json_*.
      */
@@ -1443,8 +1450,8 @@ final class Shortcode
         $mediaType    = sanitize_key((string) wp_unslash($_POST['media_platform'] ?? ''));
         $gridKey      = preg_replace('/[^a-f0-9]/', '', (string) ($_POST['grid_key'] ?? ''));
         $searchTerm   = sanitize_text_field((string) wp_unslash($_POST['search_term'] ?? ''));
-        $searchBy     = in_array((string) ($_POST['search_by'] ?? ''), ['title', 'description'], true)
-                            ? (string) $_POST['search_by'] : 'title';
+        $searchBy     = in_array((string) ($_POST['search_by'] ?? ''), ['title', 'description', 'any'], true)
+                            ? (string) $_POST['search_by'] : 'any';
         $page         = max(1, (int) ($_POST['page'] ?? 1));
         $perPage      = max(1, min(100, (int) ($_POST['per_page'] ?? 12)));
 
@@ -1500,8 +1507,14 @@ final class Shortcode
             $term       = $searchTerm;
             $by         = $searchBy;
             $renderData = array_values(array_filter($renderData, static function ($item) use ($term, $by) {
-                $field = $by === 'description' ? (string) ($item['description'] ?? '') : (string) ($item['title'] ?? '');
-                return stripos($field, $term) !== false;
+                if ($by === 'description') {
+                    return stripos((string) ($item['description'] ?? ''), $term) !== false;
+                }
+                if ($by === 'title') {
+                    return stripos((string) ($item['title'] ?? ''), $term) !== false;
+                }
+                return stripos((string) ($item['title'] ?? ''), $term) !== false
+                    || stripos((string) ($item['description'] ?? ''), $term) !== false;
             }));
         }
 

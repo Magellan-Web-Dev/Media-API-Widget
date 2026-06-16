@@ -1383,7 +1383,7 @@
 
             var currentPage     = 1;
             var currentSearch   = "";
-            var currentSearchBy = "title";
+            var currentSearchBy = "any";
             var debounceTimer   = null;
 
             function doRequest(page) {
@@ -1440,7 +1440,7 @@
                         clearTimeout(debounceTimer);
                         debounceTimer = setTimeout(function () {
                             currentSearch   = input.value;
-                            currentSearchBy = select ? select.value : "title";
+                            currentSearchBy = select ? select.value : "any";
                             doRequest(1);
                         }, 400);
                     });
