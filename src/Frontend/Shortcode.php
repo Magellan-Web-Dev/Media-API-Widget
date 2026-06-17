@@ -1698,7 +1698,7 @@ final class Shortcode
 
         $html = '';
 
-        $html .= '<button class="maw-page-btn maw-page-prev" data-page="' . esc_attr((string) max(1, $currentPage - 1)) . '"' . ($currentPage <= 1 ? ' disabled' : '') . '>&#8249; Prev</button>';
+        $html .= '<button class="maw-page-btn maw-page-prev" data-page="' . esc_attr((string) max(1, $currentPage - 1)) . '"' . ($currentPage <= 1 ? ' disabled' : '') . '>Prev</button>';
 
         $range = 2;
         $start = max(1, $currentPage - $range);
@@ -1724,7 +1724,7 @@ final class Shortcode
             $html .= '<button class="maw-page-btn maw-page-num" data-page="' . esc_attr((string) $totalPages) . '">' . esc_html((string) $totalPages) . '</button>';
         }
 
-        $html .= '<button class="maw-page-btn maw-page-next" data-page="' . esc_attr((string) min($totalPages, $currentPage + 1)) . '"' . ($currentPage >= $totalPages ? ' disabled' : '') . '>Next &#8250;</button>';
+        $html .= '<button class="maw-page-btn maw-page-next" data-page="' . esc_attr((string) min($totalPages, $currentPage + 1)) . '"' . ($currentPage >= $totalPages ? ' disabled' : '') . '>Next</button>';
 
         return $html;
     }
