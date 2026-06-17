@@ -2,6 +2,7 @@
 namespace MediaApiWidget\Frontend;
 
 use MediaApiWidget\Config\Options;
+use MediaApiWidget\Support\SafeRemoteRequest;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -40,6 +41,14 @@ final class MediaContent
         $base = rtrim($upload['basedir'] ?? WP_CONTENT_DIR . '/uploads', '/');
         $dir = $base . '/media-api-widget/backups';
         if (!is_dir($dir)) { wp_mkdir_p($dir); }
+
+        // Drop a silent index.php so the backup directory cannot be browsed
+        // even if the web server has directory listing enabled.
+        $index = $dir . '/index.php';
+        if (!is_file($index)) {
+            file_put_contents($index, "<?php\n// Silence is golden.\n");
+        }
+
         return $dir . '/';
     }
 
@@ -114,7 +123,11 @@ final class MediaContent
      */
     public static function trackedRemoteGet(string $url, array $context = [])
     {
-        $response = wp_remote_get($url);
+        // Route through the hardened wrapper so RSS feed fetches get SSRF
+        // (incl. per-redirect-hop) protection, an explicit timeout, and a
+        // response-size cap. The hardcoded YouTube/iTunes API hosts pass the
+        // public-host check unchanged.
+        $response = SafeRemoteRequest::get($url);
 
         self::logApiCallEvent(
             $context['playlist_name'] ?? '',

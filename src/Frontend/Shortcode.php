@@ -2,6 +2,7 @@
 namespace MediaApiWidget\Frontend;
 
 use MediaApiWidget\Config\Options;
+use MediaApiWidget\Support\SafeRemoteRequest;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -501,7 +502,7 @@ final class Shortcode
         $feedUrl = $mediaData;
         if ($platform !== 'custom') {
             $lookupUrl = 'https://itunes.apple.com/lookup?id=' . rawurlencode($mediaData) . '&entity=podcast';
-            $lookupRes = wp_remote_get($lookupUrl);
+            $lookupRes = SafeRemoteRequest::get($lookupUrl);
             if (is_wp_error($lookupRes) || wp_remote_retrieve_response_code($lookupRes) !== 200) {
                 return null;
             }
@@ -519,7 +520,9 @@ final class Shortcode
             }
         }
 
-        $rssRes = wp_remote_get($feedUrl);
+        // $feedUrl is admin-configured (custom) or derived from the iTunes
+        // lookup; the hardened wrapper applies SSRF, timeout and size limits.
+        $rssRes = SafeRemoteRequest::get($feedUrl);
         if (is_wp_error($rssRes) || wp_remote_retrieve_response_code($rssRes) !== 200) {
             return null;
         }

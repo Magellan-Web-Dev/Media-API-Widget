@@ -1174,6 +1174,29 @@
                         }
                     });
 
+                    // Builds the /podcast/player URL for a custom RSS feed, URL-encoding
+                    // every query value so feed/shortcode-derived data cannot break out
+                    // of the query string (or, downstream, an attribute).
+
+                    function maw_build_custom_player_url(rssUrl, itemClicked) {
+                        const ds = itemClicked.dataset;
+                        const params = new URLSearchParams();
+                        params.set("url", rssUrl);
+                        params.set("track", ds.trackselect || "");
+                        params.set("mode", ds.podcastplayermode || "");
+                        params.set("buttoncolor", ds.podcastplayerbuttoncolor || "");
+                        params.set("color1", ds.podcastplayercolor || "");
+                        params.set("progressbarcolor", ds.podcastprogressplayerbarcolor || "");
+                        params.set("highlightcolor", ds.podcastplayerhighlightcolor || "");
+                        params.set("font", ds.podcastplayerfont || "");
+                        params.set("scrollcolor", ds.podcastplayerscrollcolor || "");
+                        params.set("textcolor", ds.podcastplayertextcolor || "");
+                        if (ds.showepisodedateaftertitle === "true") {
+                            params.set("adddatetotitle", "true");
+                        }
+                        return `${window.location.origin}/podcast/player?${params.toString()}`;
+                    }
+
                     // Computes the podcast embed URL for a clicked audio item (shared by event dispatch and lightbox handler)
 
                     function compute_audio_embed_url(itemClicked) {
@@ -1200,16 +1223,7 @@
                         if (podcast_platform === "custom") {
                             const rssUrl = media_data.channel?.rssUrl;
                             if (!rssUrl) return null;
-                            const mode = itemClicked.dataset.podcastplayermode;
-                            const playButtonColor = itemClicked.dataset.podcastplayerbuttoncolor;
-                            const color = itemClicked.dataset.podcastplayercolor;
-                            const progressBarColor = itemClicked.dataset.podcastprogressplayerbarcolor;
-                            const highlightColor = itemClicked.dataset.podcastplayerhighlightcolor;
-                            const font = itemClicked.dataset.podcastplayerfont;
-                            const scrollbarColor = itemClicked.dataset.podcastplayerscrollcolor;
-                            const textColor = itemClicked.dataset.podcastplayertextcolor;
-                            const showEpisodeDateAfterTitle = itemClicked.dataset.showepisodedateaftertitle === "true" ? "adddatetotitle=true" : "";
-                            return `${window.location.origin}/podcast/player?url=${rssUrl}&track=${itemClicked.dataset.trackselect}&mode=${mode}&buttoncolor=${playButtonColor}&color1=${color}&progressbarcolor=${progressBarColor}&highlightcolor=${highlightColor}&font=${font}&scrollcolor=${scrollbarColor}&textcolor=${textColor}&${showEpisodeDateAfterTitle}`;
+                            return maw_build_custom_player_url(rssUrl, itemClicked);
                         }
                         return null;
                     }
@@ -1260,19 +1274,9 @@
                         }
 
                         if (podcast_platform === "custom") {
-                            let rssUrl = media_data.channel?.rssUrl;
+                            const rssUrl = media_data.channel?.rssUrl;
                             if (!rssUrl) return;
-                            const mode = itemClicked.dataset.podcastplayermode;
-                            const playButtonColor = itemClicked.dataset.podcastplayerbuttoncolor;
-                            const color = itemClicked.dataset.podcastplayercolor;
-                            const progressBarColor = itemClicked.dataset.podcastprogressplayerbarcolor;
-                            const highlightColor = itemClicked.dataset.podcastplayerhighlightcolor;
-                            const font = itemClicked.dataset.podcastplayerfont;
-                            const scrollbarColor = itemClicked.dataset.podcastplayerscrollcolor;
-                            const textColor = itemClicked.dataset.podcastplayertextcolor;
-                            const showEpisodeDateAfterTitle = itemClicked.dataset.showepisodedateaftertitle === "true" ? "adddatetotitle=true" : "";
-
-                            embedPlayerUrl = `${window.location.origin}/podcast/player?url=${rssUrl}&track=${itemClicked.dataset.trackselect}&mode=${mode}&buttoncolor=${playButtonColor}&color1=${color}&progressbarcolor=${progressBarColor}&highlightcolor=${highlightColor}&font=${font}&scrollcolor=${scrollbarColor}&textcolor=${textColor}&${showEpisodeDateAfterTitle}`;
+                            embedPlayerUrl = maw_build_custom_player_url(rssUrl, itemClicked);
                         }
 
                         // If Window Resolution Is Less Than 872px, Open New Window In Apple Podcasts
@@ -1282,15 +1286,6 @@
                             return
                         }
                         
-                        const media_audio_lightbox_html = `
-                            <div class="lightbox-content-container">
-                                <div class="lightbox-box-frame">
-                                    <iframe class="lightbox-podcast-embed-player" src="${embedPlayerUrl}"></iframe>
-                                </div>
-                            </div>
-                            <div class="lightbox-close-button" data-hideonidle="true" data-lightboxclosebutton="true">X</div>
-                        `;
-
                         // Init Lightbox
 
                         const lightbox = media_lightbox_div;
@@ -1300,7 +1295,33 @@
                         lightbox.classList.add(`show-lightbox`);
                         document.querySelector(`html`).classList.add(`hide-scroll`);
 
-                        lightbox.innerHTML = media_audio_lightbox_html;
+                        // Build the lightbox via DOM nodes so the embed URL is assigned as
+                        // an iframe.src property and is never parsed as HTML — even if a
+                        // feed or shortcode attribute contains markup.
+
+                        lightbox.replaceChildren();
+
+                        const contentContainer = document.createElement("div");
+                        contentContainer.className = "lightbox-content-container";
+
+                        const boxFrame = document.createElement("div");
+                        boxFrame.className = "lightbox-box-frame";
+
+                        const embedIframe = document.createElement("iframe");
+                        embedIframe.className = "lightbox-podcast-embed-player";
+                        embedIframe.src = embedPlayerUrl;
+
+                        boxFrame.appendChild(embedIframe);
+                        contentContainer.appendChild(boxFrame);
+
+                        const closeButtonEl = document.createElement("div");
+                        closeButtonEl.className = "lightbox-close-button";
+                        closeButtonEl.dataset.hideonidle = "true";
+                        closeButtonEl.dataset.lightboxclosebutton = "true";
+                        closeButtonEl.textContent = "X";
+
+                        lightbox.appendChild(contentContainer);
+                        lightbox.appendChild(closeButtonEl);
 
                         // Monitor Click Of Close Button
 

@@ -1,6 +1,8 @@
 <?php
 namespace MediaApiWidget\PodcastPlayer;
 
+use MediaApiWidget\Support\SafeRemoteRequest;
+
 if (!defined('ABSPATH')) { exit; }
 
 /**
@@ -13,8 +15,9 @@ if (!defined('ABSPATH')) { exit; }
  * associative array that the podcast-player.php template can extract
  * directly with extract().
  *
- * External network calls use the WordPress HTTP API (wp_remote_get) with
- * scheme validation and private-host blocking to prevent SSRF.
+ * External network calls route through {@see SafeRemoteRequest}, which enforces
+ * http/https-only, public-host-only validation (on the initial URL and every
+ * redirect hop), an explicit timeout, and a response-size cap to prevent SSRF.
  */
 final class DataParams
 {
@@ -103,7 +106,7 @@ final class DataParams
             if (!$safeUrl) {
                 $error  = true;
                 $errMsg = 'The RSS URL must use http or https.';
-            } elseif (!$this->isHostPublic($safeUrl)) {
+            } elseif (!SafeRemoteRequest::isHostPublic($safeUrl)) {
                 $error  = true;
                 $errMsg = 'The RSS URL host is not publicly accessible.';
             } else {
@@ -114,10 +117,9 @@ final class DataParams
         $rssFeed = null;
 
         if ($rssUrl && !$error) {
-            $response = wp_remote_get($rssUrl, [
-                'timeout'             => 10,
-                'limit_response_size' => 1048576,
-            ]);
+            // SafeRemoteRequest re-validates the host on every redirect hop and
+            // caps the response size, closing the redirect-based SSRF vector.
+            $response = SafeRemoteRequest::get($rssUrl);
             if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
                 $error = true;
             } else {
@@ -245,53 +247,6 @@ final class DataParams
             $hex = 'ffffff';
         }
         return '#' . $hex;
-    }
-
-    /**
-     * Returns true only if the host in $url resolves to a public IP address.
-     *
-     * Blocks http/https scheme violations, RFC-1918 / loopback / link-local
-     * addresses, and common private hostname suffixes to prevent SSRF.
-     */
-    private function isHostPublic(string $url): bool
-    {
-        $host = (string) parse_url($url, PHP_URL_HOST);
-        $host = trim($host, '[]'); // strip IPv6 brackets
-
-        if (!$host) {
-            return false;
-        }
-
-        // Bare IP literal: validate directly.
-        if (filter_var($host, FILTER_VALIDATE_IP)) {
-            return (bool) filter_var(
-                $host,
-                FILTER_VALIDATE_IP,
-                FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
-            );
-        }
-
-        // Reject private-network hostnames before resolution.
-        $lower = strtolower($host);
-        if (
-            $lower === 'localhost' ||
-            str_ends_with($lower, '.local') ||
-            str_ends_with($lower, '.internal')
-        ) {
-            return false;
-        }
-
-        // Resolve hostname to IPv4 and reject private ranges.
-        $resolved = gethostbyname($host);
-        if ($resolved !== $host) {
-            return (bool) filter_var(
-                $resolved,
-                FILTER_VALIDATE_IP,
-                FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
-            );
-        }
-
-        return true;
     }
 
     /**

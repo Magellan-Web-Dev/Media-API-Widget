@@ -1,3 +1,18 @@
+// Sanitize a feed-supplied image URL before it is interpolated into CSS.
+// Allows only http(s) / protocol-relative / root-relative URLs and strips the
+// characters that could break out of a double-quoted CSS url("...") value.
+
+function mawSanitizeImageUrl(url) {
+    if (typeof url !== "string") {
+        return "";
+    }
+    const trimmed = url.trim();
+    if (!/^(https?:\/\/|\/\/|\/)/i.test(trimmed)) {
+        return "";
+    }
+    return trimmed.replace(/["\\\r\n]/g, "");
+}
+
 // Set Current Play Time
 
 let playCounter = null;
@@ -198,17 +213,22 @@ function setTotalEpisodeTime(item, event) {
 
         // Set Image if episode has its own image
         if (currentEpisodeData.image) {
-            // Set Image Href
+            const safeImageUrl = mawSanitizeImageUrl(currentEpisodeData.image);
 
-            currentEpisodeImage.src = currentEpisodeData.image;
+            if (safeImageUrl) {
+                // Set Image Href
 
-            // Set Background Image
+                currentEpisodeImage.src = safeImageUrl;
 
-            backgroundImage.innerHTML = `
-                body::before {
-                    background-image: url(${currentEpisodeData.image});
-                }
-            `
+                // Set Background Image (textContent on a <style> element; the URL
+                // is scheme-validated and break-out characters are stripped)
+
+                backgroundImage.textContent = `
+                    body::before {
+                        background-image: url("${safeImageUrl}");
+                    }
+                `;
+            }
         }
 
         // Set Title Text
