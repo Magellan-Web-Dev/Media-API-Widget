@@ -1414,18 +1414,22 @@ final class Shortcode
         }
 
         $gridId = $playlistName . '_' . $mediaType;
+        $fieldId = sanitize_html_class($gridId);
 
+        $selectId = 'maw-search-by-' . $fieldId;
         $selectHtml = $searchByEnabled
-            ? '<select class="maw-search-by" aria-label="' . esc_attr__('Search by', 'media-api-widget') . '">' .
+            ? '<select id="' . esc_attr($selectId) . '" name="' . esc_attr($selectId) . '" class="maw-search-by" aria-label="' . esc_attr__('Search by', 'media-api-widget') . '">' .
                   '<option value="any">Any</option>' .
                   '<option value="title">Title</option>' .
                   '<option value="description">Description</option>' .
               '</select>'
             : '';
 
+        $inputId = 'maw-search-input-' . $fieldId;
+
         return
             '<div class="maw-grid-search-bar" data-maw-for="' . esc_attr($gridId) . '">' .
-                '<input type="text" class="maw-search-input" placeholder="' . esc_attr($placeholder) . '" aria-label="' . esc_attr__('Search', 'media-api-widget') . '">' .
+                '<input type="text" id="' . esc_attr($inputId) . '" name="' . esc_attr($inputId) . '" class="maw-search-input" placeholder="' . esc_attr($placeholder) . '" aria-label="' . esc_attr__('Search', 'media-api-widget') . '">' .
                 $selectHtml .
             '</div>';
     }
