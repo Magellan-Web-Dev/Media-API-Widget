@@ -332,7 +332,7 @@ Enable grid mode to display multiple media items in a responsive CSS grid.
 | `multiplegridusersearch` | `false` | Set to `true` to enable the user-searchable + paginated grid mode. See [Grid Search & Pagination](#grid-search--pagination). |
 | `multiplegridperpage` | `12` | Max items per page when `multiplegridusersearch="true"`. |
 | `noresults` | _(none)_ | Text shown when a user search yields no results (user-search grid only). Falls back to a generic message when empty. |
-| `nostyling` | `false` | Set to `true` to suppress all plugin CSS class names from the rendered output. Data attributes used by the lightbox JS are unaffected. |
+| `nostyling` | `false` | Set to `true` to suppress the plugin's **styling** class names (`media_item`, `media-item-*`, `media_items_multiple_grid_layout`, …) so you don't inherit the plugin's built-in CSS. The namespaced `maw-` **hook classes** (see [Styling Hooks](#styling-hooks)) are still emitted either way. Data attributes used by the lightbox JS are unaffected. |
 
 **Example — filtered grid of episodes 1–6 with titles:**
 ```
@@ -378,6 +378,35 @@ When `multiplegridusersearch="true"` is set on `[media-api-widget-render]`, the 
 ```
 
 > `multiplegridusersearch` and `multiplegrid` are mutually exclusive — when `multiplegridusersearch="true"`, the standard static grid path is bypassed entirely. All other existing grid attributes (`multiplegridgap`, `multiplegridminsize`, `multiplegridtext`, `multiplegridepisoderange`, etc.) continue to work as filters and display options within this mode.
+
+---
+
+### Styling Hooks
+
+Every rendered element carries a namespaced `maw-` **hook class** in addition to the plugin's default styling class. The plugin ships **no CSS for the `maw-` classes** — they exist purely as stable targets for your own styles. Because they're independent of the plugin's look, they are emitted **even when `nostyling="true"`**, giving you a blank visual slate plus reliable selectors.
+
+| Element | Hook class |
+|---|---|
+| Grid container | `maw-media-items-grid-layout` |
+| Item link (`<a>`) | `maw-media-item` (＋ `maw-media-item-text-overlay-enabled` when the overlay is on) |
+| Grid entry wrapper (shown when grid text is enabled) | `maw-media-item-multiple-grid-entry` |
+| Thumbnail wrapper | `maw-media-item-thumbnail-text-wrapper` |
+| Thumbnail image | `maw-media-item-thumbnail` |
+| Play button | `maw-media-item-play-button` |
+| Text overlay | `maw-media-item-text-overlay` |
+| Grid text block | `maw-media-item-multiple-grid-text` ＋ `…-text-title` / `…-text-description` |
+| Title/description block (`mediatitle` / `mediadescription`) | `maw-media-description-text` |
+| Audio play bar | `maw-audio-play-bar` |
+| Playlist heading / overlay sub-text | `maw-playlist-episode-text` / `maw-sub-text` |
+
+The grid wrapper, search bar, and pagination controls have always carried their own `maw-` classes (`maw-grid-search-wrapper`, `maw-grid-items`, `maw-grid-pagination`, `maw-page-btn`, `maw-search-input`, …) and are unaffected by `nostyling`.
+
+```css
+/* With nostyling="true": no plugin styles to override, just hooks */
+.maw-media-items-grid-layout { gap: 2rem; }
+.maw-media-item { border-radius: 12px; overflow: hidden; }
+.maw-media-item-thumbnail { aspect-ratio: 16 / 9; }
+```
 
 ---
 

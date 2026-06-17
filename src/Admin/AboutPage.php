@@ -44,6 +44,7 @@ final class AboutPage
                 <a href="#maw-shortcode-fields">Shortcode Fields</a>
                 <a href="#maw-shortcodes">Shortcodes</a>
                 <a href="#maw-render-attrs">Render Attributes</a>
+                <a href="#maw-styling-hooks">Styling Hooks</a>
                 <a href="#maw-grid">Grid Mode</a>
                 <a href="#maw-grid-search">Grid Search &amp; Pagination</a>
                 <a href="#maw-podcast-player">Podcast Player</a>
@@ -292,7 +293,7 @@ final class AboutPage
                         <tr><td><code>mediatitle</code></td><td><code>false</code></td><td>When <code>true</code>, output the episode title as a <code>&lt;p&gt;</code> tag only — no thumbnail rendered.</td></tr>
                         <tr><td><code>mediadescription</code></td><td><code>false</code></td><td>When <code>true</code>, output the episode description as a <code>&lt;p&gt;</code> tag only — no thumbnail rendered.</td></tr>
                         <tr><td><code>mediadescriptiontextcolor</code></td><td>—</td><td>CSS color for the <code>mediatitle</code> / <code>mediadescription</code> output.</td></tr>
-                        <tr><td><code>nostyling</code></td><td><code>false</code></td><td>When <code>true</code>, suppresses all plugin CSS class names from the rendered output. Applies to all render modes: single item, text-only, static grid, and user-search grid. Data attributes used by the lightbox JS are unaffected.</td></tr>
+                        <tr><td><code>nostyling</code></td><td><code>false</code></td><td>When <code>true</code>, suppresses the plugin's <strong>styling</strong> class names (<code>media_item</code>, <code>media-item-*</code>, <code>media_items_multiple_grid_layout</code>, &hellip;) so you don't inherit the plugin's built-in CSS. The namespaced <code>maw-</code> <strong>hook classes</strong> (see <a href="#maw-styling-hooks">Styling Hooks</a>) are still emitted either way. Applies to all render modes: single item, text-only, static grid, and user-search grid. Data attributes used by the lightbox JS are unaffected.</td></tr>
                         <tr><td><code>showlightbox</code></td><td><code>true</code></td><td>When <code>false</code>, clicking the item dispatches the <a href="#maw-js-events"><code>mediaApiWidgetItemClick</code></a> JS event but does <strong>not</strong> open the lightbox. Omitting this attribute (the default) preserves normal lightbox behavior for all existing shortcodes.</td></tr>
                     </tbody>
                 </table>
@@ -313,6 +314,33 @@ final class AboutPage
                         <tr><td><code>showepisodedateaftertitle</code></td><td>—</td><td>Set to <code>true</code> to append the publish date to each episode title.</td></tr>
                     </tbody>
                 </table>
+            </section>
+
+            <!-- STYLING HOOKS -->
+            <section id="maw-styling-hooks" class="maw-section">
+                <h2>Styling Hooks</h2>
+                <p>Every rendered element carries a namespaced <code>maw-</code> <strong>hook class</strong> in addition to the plugin's default styling class. The plugin ships <strong>no CSS for the <code>maw-</code> classes</strong> — they exist purely as stable targets for your own styles, so they are emitted <strong>even when <code>nostyling="true"</code></strong>. That gives you a blank visual slate plus reliable selectors.</p>
+                <table class="widefat striped maw-table maw-about-table">
+                    <thead><tr><th style="width:340px;">Element</th><th>Hook class</th></tr></thead>
+                    <tbody>
+                        <tr><td>Grid container</td><td><code>maw-media-items-grid-layout</code></td></tr>
+                        <tr><td>Item link (<code>&lt;a&gt;</code>)</td><td><code>maw-media-item</code> (＋ <code>maw-media-item-text-overlay-enabled</code> when the overlay is on)</td></tr>
+                        <tr><td>Grid entry wrapper (when grid text is enabled)</td><td><code>maw-media-item-multiple-grid-entry</code></td></tr>
+                        <tr><td>Thumbnail wrapper</td><td><code>maw-media-item-thumbnail-text-wrapper</code></td></tr>
+                        <tr><td>Thumbnail image</td><td><code>maw-media-item-thumbnail</code></td></tr>
+                        <tr><td>Play button</td><td><code>maw-media-item-play-button</code></td></tr>
+                        <tr><td>Text overlay</td><td><code>maw-media-item-text-overlay</code></td></tr>
+                        <tr><td>Grid text block</td><td><code>maw-media-item-multiple-grid-text</code> ＋ <code>&hellip;-text-title</code> / <code>&hellip;-text-description</code></td></tr>
+                        <tr><td>Title/description block (<code>mediatitle</code> / <code>mediadescription</code>)</td><td><code>maw-media-description-text</code></td></tr>
+                        <tr><td>Audio play bar</td><td><code>maw-audio-play-bar</code></td></tr>
+                        <tr><td>Playlist heading / overlay sub-text</td><td><code>maw-playlist-episode-text</code> / <code>maw-sub-text</code></td></tr>
+                    </tbody>
+                </table>
+                <p class="description">The grid wrapper, search bar, and pagination controls have always carried their own <code>maw-</code> classes (<code>maw-grid-search-wrapper</code>, <code>maw-grid-items</code>, <code>maw-grid-pagination</code>, <code>maw-page-btn</code>, <code>maw-search-input</code>, &hellip;) and are unaffected by <code>nostyling</code>.</p>
+                <pre class="maw-code">/* With nostyling="true": no plugin styles to override, just hooks */
+.maw-media-items-grid-layout &#123; gap: 2rem; &#125;
+.maw-media-item &#123; border-radius: 12px; overflow: hidden; &#125;
+.maw-media-item-thumbnail &#123; aspect-ratio: 16 / 9; &#125;</pre>
             </section>
 
             <!-- GRID MODE -->

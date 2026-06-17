@@ -245,7 +245,7 @@ final class Shortcode
                     if ($itemData['mediadescriptiontextcolor'] !== '') {
                         $style = ' style="color: ' . esc_attr($itemData['mediadescriptiontextcolor']) . '"';
                     }
-                    $cls = $itemData['nostyling'] ? '' : ' class="media-description-text"';
+                    $cls = $this->classAttr('maw-media-description-text', $itemData['nostyling'] ? '' : 'media-description-text');
                     return '<p' . $cls . $style . '>' . esc_html($descriptionOrTitle) . '</p>';
                 }
             }
@@ -297,7 +297,7 @@ final class Shortcode
                 $gridHtml .= $this->renderMediaItem($row, $gridSettings, false, $playlistName, $mediaType);
             }
 
-            $gridClass = $itemData['nostyling'] ? '' : ' class="media_items_multiple_grid_layout"';
+            $gridClass = $this->classAttr('maw-media-items-grid-layout', $itemData['nostyling'] ? '' : 'media_items_multiple_grid_layout');
             return '<div' . $gridClass . ' style="gap: ' . esc_attr($itemData['multiplegridgap']) . '; grid-template-columns: repeat(auto-fill, minmax(min(100%, ' . esc_attr($itemData['multiplegridminsize']) . '), 1fr));">' . $gridHtml . '</div>';
         }
 
@@ -854,7 +854,8 @@ final class Shortcode
         $thumbnailHeight = isset($thumbnail['height']) ? (int) $thumbnail['height'] : 720;
 
         $noStyling = !empty($settings['noStyling']);
-        $class = $noStyling ? '' : ('media_item' . ($settings['showTextOverlay'] ? '-text-overlay-enabled' : ''));
+        $styleClass = $noStyling ? '' : ('media_item' . ($settings['showTextOverlay'] ? '-text-overlay-enabled' : ''));
+        $hookClass = 'maw-media-item' . ($settings['showTextOverlay'] ? ' maw-media-item-text-overlay-enabled' : '');
         $style = '';
         if ($settings['fontFamily'] !== '') {
             $style = ' style="font-family: ' . esc_attr((string) $settings['fontFamily']) . ';"';
@@ -901,14 +902,14 @@ final class Shortcode
             } else {
                 $playButtonInner = $this->playButtonIconSvg();
             }
-            $pbClass = $noStyling ? '' : ' class="media-item-play-button"';
+            $pbClass = $this->classAttr('maw-media-item-play-button', $noStyling ? '' : 'media-item-play-button');
             $playButtonHtml = '<div' . $pbClass . ' style="' . esc_attr((string) $settings['playButtonStyling']) . '">' . $playButtonInner . '</div>';
         }
 
         $textOverlay = '';
         if ($settings['showTextOverlay']) {
             $audioTextStyle = $mediaType === 'audio' ? ' style="padding-bottom: max(10vw, 48px);"' : '';
-            $toClass = $noStyling ? '' : ' class="media-item-text-overlay"';
+            $toClass = $this->classAttr('maw-media-item-text-overlay', $noStyling ? '' : 'media-item-text-overlay');
             $textOverlay =
                 '<div' . $toClass . $audioTextStyle . '>' .
                     '<h3>' . $this->renderOverlayTitle($title, $episode) . '</h3>' .
@@ -918,7 +919,7 @@ final class Shortcode
 
         $playlistHeading = '';
         if ($playlistItem) {
-            $phClass = $noStyling ? '' : ' class="playlist-episode-text"';
+            $phClass = $this->classAttr('maw-playlist-episode-text', $noStyling ? '' : 'playlist-episode-text');
             $playlistHeading = '<h3' . $phClass . '>' . esc_html($episode !== -1 ? ('Episode ' . $episode) : $title) . '</h3>';
         }
 
@@ -932,9 +933,9 @@ final class Shortcode
             $multipleGridTextHtml = $this->renderMultipleGridText($item, (string) $settings['multipleGridText'], $noStyling);
         }
 
-        $aClassAttr    = $class !== '' ? ' class="' . esc_attr($class) . '"' : '';
-        $wrapperClass  = $noStyling ? '' : ' class="media-item-thumbnail-text-wrapper"';
-        $imgClass      = $noStyling ? '' : ' class="media-item-thumbnail"';
+        $aClassAttr    = $this->classAttr($hookClass, $styleClass);
+        $wrapperClass  = $this->classAttr('maw-media-item-thumbnail-text-wrapper', $noStyling ? '' : 'media-item-thumbnail-text-wrapper');
+        $imgClass      = $this->classAttr('maw-media-item-thumbnail', $noStyling ? '' : 'media-item-thumbnail');
         $mediaItemHtml =
             '<a' . $style .
                 $aClassAttr .
@@ -962,7 +963,7 @@ final class Shortcode
         $itemComment = '<!-- ' . esc_html($name) . ' ' . esc_html($type) . ' item - ' . esc_html($title) . ' (Published On - ' . esc_html($publishedDate) . ') -->';
 
         if ($multipleGridTextHtml !== '') {
-            $entryClass = $noStyling ? '' : ' class="media-item-multiple-grid-entry"';
+            $entryClass = $this->classAttr('maw-media-item-multiple-grid-entry', $noStyling ? '' : 'media-item-multiple-grid-entry');
             return $itemComment .
                 '<div' . $entryClass . '>' .
                     $mediaItemHtml .
@@ -995,7 +996,7 @@ final class Shortcode
         if (count($words) > 3) {
             $first = implode(' ', array_slice($words, 0, 3));
             $rest = implode(' ', array_slice($words, 3));
-            return esc_html($first) . '<br><span class="sub-text">' . esc_html($rest) . '</span>';
+            return esc_html($first) . '<br><span class="maw-sub-text sub-text">' . esc_html($rest) . '</span>';
         }
 
         return esc_html($title);
@@ -1014,8 +1015,10 @@ final class Shortcode
      */
     private function renderMultipleGridText(array $item, string $mode, bool $noStyling = false): string
     {
-        $cls = static function (string $suffix) use ($noStyling): string {
-            return $noStyling ? '' : (' class="media-item-multiple-grid-text media-item-multiple-grid-text-' . esc_attr($suffix) . '"');
+        $cls = function (string $suffix) use ($noStyling): string {
+            $hook    = 'maw-media-item-multiple-grid-text maw-media-item-multiple-grid-text-' . $suffix;
+            $styling = $noStyling ? '' : ('media-item-multiple-grid-text media-item-multiple-grid-text-' . $suffix);
+            return $this->classAttr($hook, $styling);
         };
 
         if ($mode === 'both') {
@@ -1074,7 +1077,7 @@ final class Shortcode
      */
     private function audioPlayBarSvg(string $color = '#fff', bool $noStyling = false): string
     {
-        $svgClass = $noStyling ? '' : ' class="audio-play-bar"';
+        $svgClass = $this->classAttr('maw-audio-play-bar', $noStyling ? '' : 'audio-play-bar');
         return '<svg xmlns="http://www.w3.org/2000/svg" id="audio_play_bar"' . $svgClass . ' data-name="Layer 1" viewBox="0 0 453 45"><defs><style>.pb-2{fill:#231f20}.pb-3{fill:none;stroke:#231f20;stroke-width:3px}</style></defs><rect style="fill:' . esc_attr($color) . '" width="453" height="45"></rect><polygon class="pb-2" points="42.99 22 17.01 7 17.01 37 42.99 22"></polygon><line class="pb-3" x1="52" y1="9" x2="52" y2="36"></line><line class="pb-3" x1="58" y1="9" x2="58" y2="36"></line><line class="pb-3" x1="64" y1="9" x2="64" y2="36"></line><line class="pb-3" x1="70" y1="9" x2="70" y2="36"></line><line class="pb-3" x1="76" y1="9" x2="76" y2="36"></line><line class="pb-3" x1="82" y1="9" x2="82" y2="36"></line><line class="pb-3" x1="88" y1="9" x2="88" y2="36"></line><line class="pb-3" x1="94" y1="9" x2="94" y2="36"></line><line class="pb-3" x1="100" y1="9" x2="100" y2="36"></line><line class="pb-3" x1="106" y1="9" x2="106" y2="36"></line><line class="pb-3" x1="112" y1="9" x2="112" y2="36"></line><line class="pb-3" x1="118" y1="9" x2="118" y2="36"></line><line class="pb-3" x1="124" y1="9" x2="124" y2="36"></line><line class="pb-3" x1="130" y1="9" x2="130" y2="36"></line><line class="pb-3" x1="136" y1="9" x2="136" y2="36"></line><line class="pb-3" x1="142" y1="9" x2="142" y2="36"></line><line class="pb-3" x1="148" y1="9" x2="148" y2="36"></line><line class="pb-3" x1="154" y1="9" x2="154" y2="36"></line><line class="pb-3" x1="160" y1="9" x2="160" y2="36"></line><line class="pb-3" x1="166" y1="9" x2="166" y2="36"></line><line class="pb-3" x1="172" y1="9" x2="172" y2="36"></line><line class="pb-3" x1="178" y1="9" x2="178" y2="36"></line><line class="pb-3" x1="184" y1="9" x2="184" y2="36"></line><line class="pb-3" x1="190" y1="9" x2="190" y2="36"></line><line class="pb-3" x1="196" y1="9" x2="196" y2="36"></line><line class="pb-3" x1="202" y1="9" x2="202" y2="36"></line><line class="pb-3" x1="208" y1="9" x2="208" y2="36"></line><line class="pb-3" x1="214" y1="9" x2="214" y2="36"></line><line class="pb-3" x1="220" y1="9" x2="220" y2="36"></line><line class="pb-3" x1="226" y1="9" x2="226" y2="36"></line><line class="pb-3" x1="232" y1="9" x2="232" y2="36"></line><line class="pb-3" x1="238" y1="9" x2="238" y2="36"></line><line class="pb-3" x1="244" y1="9" x2="244" y2="36"></line><line class="pb-3" x1="250" y1="9" x2="250" y2="36"></line><line class="pb-3" x1="256" y1="9" x2="256" y2="36"></line><line class="pb-3" x1="262" y1="9" x2="262" y2="36"></line><line class="pb-3" x1="268" y1="9" x2="268" y2="36"></line><line class="pb-3" x1="274" y1="9" x2="274" y2="36"></line><line class="pb-3" x1="280" y1="9" x2="280" y2="36"></line><line class="pb-3" x1="286" y1="9" x2="286" y2="36"></line><line class="pb-3" x1="292" y1="9" x2="292" y2="36"></line><line class="pb-3" x1="298" y1="9" x2="298" y2="36"></line><line class="pb-3" x1="304" y1="9" x2="304" y2="36"></line><line class="pb-3" x1="310" y1="9" x2="310" y2="36"></line><line class="pb-3" x1="316" y1="9" x2="316" y2="36"></line><line class="pb-3" x1="322" y1="9" x2="322" y2="36"></line><line class="pb-3" x1="328" y1="9" x2="328" y2="36"></line><line class="pb-3" x1="334" y1="9" x2="334" y2="36"></line><line class="pb-3" x1="340" y1="9" x2="340" y2="36"></line><line class="pb-3" x1="346" y1="9" x2="346" y2="36"></line><line class="pb-3" x1="352" y1="9" x2="352" y2="36"></line><line class="pb-3" x1="358" y1="9" x2="358" y2="36"></line><line class="pb-3" x1="364" y1="9" x2="364" y2="36"></line><line class="pb-3" x1="370" y1="9" x2="370" y2="36"></line><line class="pb-3" x1="376" y1="9" x2="376" y2="36"></line><line class="pb-3" x1="382" y1="9" x2="382" y2="36"></line><line class="pb-3" x1="388" y1="9" x2="388" y2="36"></line><line class="pb-3" x1="394" y1="9" x2="394" y2="36"></line><line class="pb-3" x1="400" y1="9" x2="400" y2="36"></line><line class="pb-3" x1="406" y1="9" x2="406" y2="36"></line><line class="pb-3" x1="412" y1="9" x2="412" y2="36"></line><line class="pb-3" x1="418" y1="9" x2="418" y2="36"></line><line class="pb-3" x1="424" y1="9" x2="424" y2="36"></line><line class="pb-3" x1="430" y1="9" x2="430" y2="36"></line><line class="pb-3" x1="436" y1="9" x2="436" y2="36"></line></svg>';
     }
 
@@ -1094,6 +1097,33 @@ final class Shortcode
             '1', 'true', 'yes', 'on' => true,
             default                  => false,
         };
+    }
+
+    /**
+     * Builds a ` class="..."` attribute string from one or more class names.
+     *
+     * Empty/blank arguments are dropped, so callers can pass an always-present
+     * namespaced hook class (e.g. "maw-media-item") alongside a styling class
+     * that is suppressed when `nostyling="true"` is in effect. The hook classes
+     * carry no plugin CSS of their own; they exist purely as stable targets for
+     * site-authored styles, which is why they are emitted regardless of the
+     * nostyling flag. Returns '' only when every argument is empty.
+     *
+     * @param string ...$classes Class names (hook first, styling second by convention).
+     * @return string ` class="..."` attribute, or '' when no class names remain.
+     */
+    private function classAttr(string ...$classes): string
+    {
+        $list = array_filter(
+            array_map('trim', $classes),
+            static fn(string $c): bool => $c !== ''
+        );
+
+        if ($list === []) {
+            return '';
+        }
+
+        return ' class="' . esc_attr(implode(' ', $list)) . '"';
     }
 
     /**
@@ -1546,7 +1576,7 @@ final class Shortcode
                 : '<h3 class="media-api-widget-err-msg">No ' . esc_html($mediaType) . ' items found.</h3>';
         }
 
-        $layoutClass     = $noStyling ? '' : ' class="media_items_multiple_grid_layout"';
+        $layoutClass     = $this->classAttr('maw-media-items-grid-layout', $noStyling ? '' : 'media_items_multiple_grid_layout');
         $gridWrapperHtml =
             '<div' . $layoutClass . ' style="gap: ' . esc_attr($gap) . '; grid-template-columns: repeat(auto-fill, minmax(min(100%, ' . esc_attr($minsize) . '), 1fr));">' .
                 $gridHtml .
@@ -1630,7 +1660,7 @@ final class Shortcode
                 : '<h3 class="media-api-widget-err-msg">No ' . esc_html($mediaType) . ' items found in playlist based upon search parameters provided.</h3>';
         }
 
-        $layoutClass    = $noStyling ? '' : ' class="media_items_multiple_grid_layout"';
+        $layoutClass    = $this->classAttr('maw-media-items-grid-layout', $noStyling ? '' : 'media_items_multiple_grid_layout');
         $gridLayoutHtml =
             '<div' . $layoutClass . ' style="gap: ' . esc_attr($gap) . '; grid-template-columns: repeat(auto-fill, minmax(min(100%, ' . esc_attr($minsize) . '), 1fr));">' .
                 $gridHtml .
