@@ -53,32 +53,29 @@ final class MediaContent
     }
 
     /**
-     * Extracts a leading episode number from a video title string.
+     * Extracts an episode number from a video title string.
      *
-     * Scans character-by-character from the start of the title, collecting
-     * consecutive digit characters. Returns the parsed integer when it is
-     * non-zero and less than 2000 (to exclude year-format numbers). Returns
-     * -1 when no qualifying episode number is found.
+     * Collects every run of consecutive digits in the title and returns the
+     * last one that qualifies (non-zero and less than 2000, to exclude
+     * year-format numbers). Scanning from the end means season/episode style
+     * titles such as "TWCS5E13" resolve to the episode (13) rather than the
+     * season (5), while single-number titles like "Retire Smart Austin EP248"
+     * still return that number (248). Returns -1 when no qualifying number is
+     * found.
      *
      * @param string $title The video title to parse (e.g. "042 - Episode Name").
      * @return int Episode number (1–1999), or -1 if none found.
      */
     public static function episodeNumberGenerator(string $title): int
     {
-        $output = '';
-        $splitter = str_split($title);
-        foreach ($splitter as $char) {
-            if (preg_match('/[0-9]/', $char) === 1) {
-                $output .= $char;
-            } else {
-                if ($output !== '') {
-                    break;
-                }
-            }
+        if (!preg_match_all('/[0-9]+/', $title, $matches)) {
+            return -1;
         }
-        $output = intval($output);
-        if ($output !== 0 && $output < 2000) {
-            return intval($output);
+        foreach (array_reverse($matches[0]) as $number) {
+            $number = intval($number);
+            if ($number !== 0 && $number < 2000) {
+                return $number;
+            }
         }
         return -1;
     }
