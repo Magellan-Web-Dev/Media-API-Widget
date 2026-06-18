@@ -483,6 +483,21 @@ final class MetaUpdater
         $metaTitle = implode(' | ', $titleParts);
         $image = $selectedItem['image'] !== '' ? $selectedItem['image'] : $payload['image'];
         $currentUrl = get_permalink(get_queried_object_id());
+
+        // Make paginated grid URLs (?maw_page_{grid}=N) canonical to themselves
+        // rather than collapsing to page 1, so pages 2+ can be discovered and
+        // indexed on their own. Page 1 carries no param and is unaffected.
+        if (is_string($currentUrl) && $currentUrl !== '') {
+            foreach ($_GET as $getKey => $getValue) {
+                if (is_string($getKey) && strpos($getKey, 'maw_page_') === 0) {
+                    $pageNum = (int) $getValue;
+                    if ($pageNum > 1) {
+                        $currentUrl = add_query_arg(sanitize_key($getKey), $pageNum, $currentUrl);
+                    }
+                }
+            }
+        }
+
         $ogType = $context['media_type'] === 'youtube' ? 'video.other' : 'article';
 
         $publishedDate = $selectedItem['published_date'] ?? '';

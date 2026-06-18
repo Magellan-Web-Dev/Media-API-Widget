@@ -1402,12 +1402,31 @@
             var gridItemsEl  = wrapper.querySelector(".maw-grid-items");
             var paginationEl = wrapper.querySelector(".maw-grid-pagination");
 
-            var currentPage     = 1;
+            var pageParam = wrapper.dataset.mawPageParam || ("maw_page_" + gridId);
+            var baseUrl   = window.location.origin + window.location.pathname;
+
+            function readPageFromUrl() {
+                var p = parseInt(new URLSearchParams(window.location.search).get(pageParam), 10);
+                return p && p > 0 ? p : 1;
+            }
+
+            var currentPage     = readPageFromUrl();
             var currentSearch   = "";
             var currentSearchBy = "any";
             var debounceTimer   = null;
 
-            function doRequest(page) {
+            function syncUrl() {
+                var params = new URLSearchParams(window.location.search);
+                if (currentPage > 1) {
+                    params.set(pageParam, currentPage);
+                } else {
+                    params.delete(pageParam);
+                }
+                var qs = params.toString();
+                window.history.pushState({ mawPage: currentPage }, "", baseUrl + (qs ? "?" + qs : ""));
+            }
+
+            function doRequest(page, updateUrl) {
                 currentPage = page || 1;
                 wrapper.classList.add("loading");
 
@@ -1421,6 +1440,7 @@
                 formData.append("search_by",     currentSearchBy);
                 formData.append("page",          currentPage);
                 formData.append("per_page",      perPage);
+                formData.append("base_url",      baseUrl);
 
                 fetch(mawGridSearchData.ajaxUrl, { method: "POST", body: formData })
                     .then(function (r) { return r.json(); })
@@ -1429,6 +1449,11 @@
                             if (gridItemsEl)  gridItemsEl.innerHTML  = data.data.html;
                             if (paginationEl) paginationEl.innerHTML = data.data.pagination;
                             bindPaginationButtons();
+                            // Only plain pagination is reflected in the URL; search
+                            // stays AJAX-only so query variants aren't crawled.
+                            if (updateUrl && currentSearch === "") {
+                                syncUrl();
+                            }
                         }
                         wrapper.classList.remove("loading");
                     })
@@ -1439,18 +1464,27 @@
 
             function bindPaginationButtons() {
                 if (!paginationEl) { return; }
-                paginationEl.querySelectorAll(".maw-page-btn").forEach(function (btn) {
-                    btn.addEventListener("click", function () {
-                        if (btn.disabled) { return; }
-                        var page = parseInt(btn.dataset.page, 10);
+                paginationEl.querySelectorAll("a.maw-page-btn, button.maw-page-btn").forEach(function (ctrl) {
+                    ctrl.addEventListener("click", function (e) {
+                        if (ctrl.tagName === "A") { e.preventDefault(); }
+                        if (ctrl.disabled || ctrl.getAttribute("aria-disabled") === "true") { return; }
+                        var page = parseInt(ctrl.dataset.page, 10);
                         if (page && page !== currentPage) {
-                            doRequest(page);
+                            doRequest(page, true);
                         }
                     });
                 });
             }
 
             bindPaginationButtons();
+
+            window.addEventListener("popstate", function () {
+                if (currentSearch !== "") { return; }
+                var page = readPageFromUrl();
+                if (page !== currentPage) {
+                    doRequest(page, false);
+                }
+            });
 
             if (searchBar) {
                 var input       = searchBar.querySelector(".maw-search-input");
@@ -1463,7 +1497,7 @@
                         debounceTimer = setTimeout(function () {
                             currentSearch   = input.value;
                             currentSearchBy = select ? select.value : "any";
-                            doRequest(1);
+                            doRequest(1, false);
                         }, 400);
                     });
                 }
@@ -1472,7 +1506,7 @@
                     select.addEventListener("change", function () {
                         currentSearchBy = select.value;
                         if (currentSearch !== "") {
-                            doRequest(1);
+                            doRequest(1, false);
                         }
                     });
                 }
@@ -1483,7 +1517,7 @@
                         input.value     = "";
                         currentSearch   = "";
                         currentSearchBy = select ? select.value : "any";
-                        doRequest(1);
+                        doRequest(1, false);
                         input.focus();
                     });
                 }

@@ -1500,6 +1500,7 @@ final class Shortcode
                             ? (string) $_POST['search_by'] : 'any';
         $page         = max(1, (int) ($_POST['page'] ?? 1));
         $perPage      = max(1, min(100, (int) ($_POST['per_page'] ?? 12)));
+        $baseUrl      = esc_url_raw((string) wp_unslash($_POST['base_url'] ?? ''));
 
         if ($playlistName === '' || $mediaType === '' || $gridKey === '') {
             wp_send_json_error(['message' => 'Missing required parameters.'], 400);
@@ -1596,9 +1597,11 @@ final class Shortcode
                 $gridHtml .
             '</div>';
 
+        $pageParam = 'maw_page_' . $playlistName . '_' . $mediaType;
+
         wp_send_json_success([
             'html'        => $gridWrapperHtml,
-            'pagination'  => $this->renderPaginationHtml($page, $totalPages),
+            'pagination'  => $this->renderPaginationHtml($page, $totalPages, $baseUrl, $pageParam),
             'total'       => $total,
             'page'        => $page,
             'total_pages' => $totalPages,
@@ -1666,7 +1669,17 @@ final class Shortcode
         if ($maxPages > 0) {
             $totalPages = min($totalPages, $maxPages);
         }
-        $pageData   = array_slice($filteredData, 0, $perPage);
+
+        // Each grid gets its own page param so multiple grids on one page
+        // never paginate together. The page is read from the URL so crawlers
+        // (and no-JS visitors) get the correct server-rendered slice.
+        $pageParam = 'maw_page_' . $gridId;
+        $page      = isset($_GET[$pageParam]) ? max(1, (int) $_GET[$pageParam]) : 1;
+        $page      = min($page, $totalPages);
+        $baseUrl   = (string) get_permalink();
+
+        $offset   = ($page - 1) * $perPage;
+        $pageData = array_slice($filteredData, $offset, $perPage);
 
         $gridHtml = '';
         foreach ($pageData as $row) {
@@ -1692,58 +1705,99 @@ final class Shortcode
                 ' data-maw-mediatype="' . esc_attr($mediaType) . '"' .
                 ' data-maw-perpage="' . esc_attr((string) $perPage) . '"' .
                 ' data-maw-grid-key="' . esc_attr($gridKey) . '"' .
+                ' data-maw-page-param="' . esc_attr($pageParam) . '"' .
             '>' .
                 '<div class="maw-grid-items">' . $gridLayoutHtml . '</div>' .
-                '<div class="maw-grid-pagination">' . $this->renderPaginationHtml(1, $totalPages) . '</div>' .
+                '<div class="maw-grid-pagination">' . $this->renderPaginationHtml($page, $totalPages, $baseUrl, $pageParam) . '</div>' .
             '</div>';
     }
 
     /**
-     * Renders prev/page-number/next pagination button HTML.
+     * Renders prev/page-number/next pagination HTML.
      *
      * Returns an empty string when $totalPages <= 1. Shows up to 5 page
      * numbers centred on the current page, with ellipsis for gaps, and
-     * always includes the first and last page buttons.
+     * always includes the first and last page links.
      *
-     * @param int $currentPage Current 1-based page number.
-     * @param int $totalPages  Total number of pages.
-     * @return string HTML string of pagination buttons.
+     * When $baseUrl and $pageParam are supplied, navigable controls are
+     * rendered as crawlable <a href> links (page 1 drops the param so it maps
+     * to the clean base URL); the front-end JS intercepts clicks for AJAX as a
+     * progressive enhancement. Without them it falls back to <button> markup.
+     * The current page and disabled prev/next render as non-navigable <span>s.
+     * Class names are identical across all variants.
+     *
+     * @param int    $currentPage Current 1-based page number.
+     * @param int    $totalPages  Total number of pages.
+     * @param string $baseUrl     Page URL used to build link hrefs.
+     * @param string $pageParam   Query-arg name holding the page number.
+     * @return string HTML string of pagination controls.
      */
-    private function renderPaginationHtml(int $currentPage, int $totalPages): string
+    private function renderPaginationHtml(int $currentPage, int $totalPages, string $baseUrl = '', string $pageParam = ''): string
     {
         if ($totalPages <= 1) {
             return '';
         }
 
-        $html = '';
+        $useLinks = $baseUrl !== '' && $pageParam !== '';
 
-        $html .= '<button class="maw-page-btn maw-page-prev" data-page="' . esc_attr((string) max(1, $currentPage - 1)) . '"' . ($currentPage <= 1 ? ' disabled' : '') . '>Prev</button>';
+        $urlFor = static function (int $page) use ($baseUrl, $pageParam): string {
+            return $page <= 1
+                ? remove_query_arg($pageParam, $baseUrl)
+                : add_query_arg($pageParam, $page, $baseUrl);
+        };
+
+        // Navigable control: an <a> when links are enabled (crawlable + JS
+        // enhanced), otherwise a <button> for the legacy AJAX-only path.
+        $control = static function (int $page, string $extraClass, string $label, string $rel = '') use ($useLinks, $urlFor): string {
+            $class = 'maw-page-btn ' . $extraClass;
+            if ($useLinks) {
+                $relAttr = $rel !== '' ? ' rel="' . esc_attr($rel) . '"' : '';
+                return '<a class="' . esc_attr($class) . '" href="' . esc_url($urlFor($page)) . '" data-page="' . esc_attr((string) $page) . '"' . $relAttr . '>' . esc_html($label) . '</a>';
+            }
+            return '<button class="' . esc_attr($class) . '" data-page="' . esc_attr((string) $page) . '">' . esc_html($label) . '</button>';
+        };
+
+        // Non-navigable control: the current page or a disabled prev/next.
+        $staticControl = static function (string $extraClass, string $label, bool $isCurrent) use ($useLinks): string {
+            $class = 'maw-page-btn ' . $extraClass;
+            if ($useLinks) {
+                $aria = $isCurrent ? ' aria-current="page"' : ' aria-disabled="true"';
+                return '<span class="' . esc_attr($class) . '"' . $aria . '>' . esc_html($label) . '</span>';
+            }
+            return '<button class="' . esc_attr($class) . '" disabled>' . esc_html($label) . '</button>';
+        };
+
+        $html = $currentPage <= 1
+            ? $staticControl('maw-page-prev', 'Prev', false)
+            : $control($currentPage - 1, 'maw-page-prev', 'Prev', 'prev');
 
         $range = 2;
         $start = max(1, $currentPage - $range);
         $end   = min($totalPages, $currentPage + $range);
 
         if ($start > 1) {
-            $html .= '<button class="maw-page-btn maw-page-num" data-page="1">1</button>';
+            $html .= $control(1, 'maw-page-num', '1');
             if ($start > 2) {
                 $html .= '<span class="maw-page-ellipsis">&hellip;</span>';
             }
         }
 
         for ($i = $start; $i <= $end; $i++) {
-            $active   = $i === $currentPage ? ' active' : '';
-            $disabled = $i === $currentPage ? ' disabled' : '';
-            $html    .= '<button class="maw-page-btn maw-page-num' . $active . '" data-page="' . esc_attr((string) $i) . '"' . $disabled . '>' . esc_html((string) $i) . '</button>';
+            $html .= $i === $currentPage
+                ? $staticControl('maw-page-num active', (string) $i, true)
+                : $control($i, 'maw-page-num', (string) $i);
         }
 
         if ($end < $totalPages) {
             if ($end < $totalPages - 1) {
                 $html .= '<span class="maw-page-ellipsis">&hellip;</span>';
             }
-            $html .= '<button class="maw-page-btn maw-page-num" data-page="' . esc_attr((string) $totalPages) . '">' . esc_html((string) $totalPages) . '</button>';
+            $html .= $control($totalPages, 'maw-page-num', (string) $totalPages);
         }
 
-        $html .= '<button class="maw-page-btn maw-page-next" data-page="' . esc_attr((string) min($totalPages, $currentPage + 1)) . '"' . ($currentPage >= $totalPages ? ' disabled' : '') . '>Next</button>';
+        $html .= $currentPage >= $totalPages
+            ? $staticControl('maw-page-next', 'Next', false)
+            : $control($currentPage + 1, 'maw-page-next', 'Next', 'next');
 
         return $html;
     }
