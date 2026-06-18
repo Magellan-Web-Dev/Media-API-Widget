@@ -1453,8 +1453,9 @@
             bindPaginationButtons();
 
             if (searchBar) {
-                var input  = searchBar.querySelector(".maw-search-input");
-                var select = searchBar.querySelector(".maw-search-by");
+                var input       = searchBar.querySelector(".maw-search-input");
+                var select      = searchBar.querySelector(".maw-search-by");
+                var clearButton = searchBar.querySelector(".maw-search-clear");
 
                 if (input) {
                     input.addEventListener("input", function () {
@@ -1473,6 +1474,17 @@
                         if (currentSearch !== "") {
                             doRequest(1);
                         }
+                    });
+                }
+
+                if (clearButton && input) {
+                    clearButton.addEventListener("click", function () {
+                        clearTimeout(debounceTimer);
+                        input.value     = "";
+                        currentSearch   = "";
+                        currentSearchBy = select ? select.value : "any";
+                        doRequest(1);
+                        input.focus();
                     });
                 }
             }

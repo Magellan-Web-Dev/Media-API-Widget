@@ -244,6 +244,9 @@ final class AboutPage
                 <p><strong>Hide the Search By dropdown (always searches across title and description):</strong></p>
                 <pre class="maw-code">[media-api-widget-grid-search playlist_name="my_show" media_platform="youtube" searchbyenabled="false"]</pre>
 
+                <p><strong>Hide the clear button:</strong></p>
+                <pre class="maw-code">[media-api-widget-grid-search playlist_name="my_show" media_platform="youtube" clearsearchbutton="false"]</pre>
+
                 <table class="widefat striped maw-table maw-about-table" style="margin-top:12px;">
                     <thead><tr><th style="width:200px;">Attribute</th><th style="width:160px;">Default</th><th>Description</th></tr></thead>
                     <tbody>
@@ -251,6 +254,7 @@ final class AboutPage
                         <tr><td><code>media_platform</code></td><td><em>required</em></td><td>Must match the <code>media_platform</code> on the target grid shortcode.</td></tr>
                         <tr><td><code>placeholder</code></td><td><code>Search...</code></td><td>Placeholder text shown inside the search input field.</td></tr>
                         <tr><td><code>searchbyenabled</code></td><td><code>true</code></td><td>When <code>false</code>, hides the Search By dropdown and always searches across both title and description.</td></tr>
+                        <tr><td><code>clearsearchbutton</code></td><td><code>true</code></td><td>When <code>false</code>, hides the clear (×) button that appears next to the search input. When visible, clicking it clears the field, fires the search AJAX immediately, and returns focus to the input.</td></tr>
                     </tbody>
                 </table>
             </section>
@@ -361,6 +365,7 @@ final class AboutPage
                         <tr><td><code>multiplegridtext</code></td><td>—</td><td>Show text below each grid item: <code>title</code>, <code>description</code>, or <code>both</code>. YouTube only.</td></tr>
                         <tr><td><code>multiplegridusersearch</code></td><td><code>false</code></td><td>Set to <code>true</code> to enable the user-searchable + paginated grid mode. See <a href="#maw-grid-search">Grid Search &amp; Pagination</a>.</td></tr>
                         <tr><td><code>multiplegridperpage</code></td><td><code>12</code></td><td>Max items per page when <code>multiplegridusersearch="true"</code>.</td></tr>
+                        <tr><td><code>multiplegridmaxpages</code></td><td>—</td><td>Cap the maximum number of pagination pages when <code>multiplegridusersearch="true"</code>. Omit or leave empty for no limit.</td></tr>
                         <tr><td><code>noresults</code></td><td>—</td><td>Text shown when a user search yields no results (user-search grid only). Falls back to a generic message when empty.</td></tr>
                     </tbody>
                 </table>
@@ -400,6 +405,7 @@ final class AboutPage
                     <li>A CSS class <code>loading</code> is applied to the wrapper element while any AJAX request is in flight, making the grid semi-transparent and non-interactive.</li>
                     <li>The search bar shortcode can be placed anywhere on the page — it does not need to be adjacent to the grid.</li>
                     <li>Use <code>noresults="..."</code> to set custom text that appears when a search returns zero items.</li>
+                    <li>Use <code>multiplegridmaxpages="N"</code> to cap the pagination to at most <em>N</em> pages. Omit the attribute for no limit.</li>
                 </ul>
 
                 <div class="maw-callout">

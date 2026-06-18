@@ -139,6 +139,7 @@ final class Shortcode
             'multiplegridtext' => '',
             'multiplegridusersearch' => 'false',
             'multiplegridperpage' => '12',
+            'multiplegridmaxpages' => '',
             'nostyling' => 'false',
             'noresults' => '',
             'podcastplayermode' => '',
@@ -213,6 +214,7 @@ final class Shortcode
             'multiplegridtext' => $mediaType === 'youtube' ? $this->sanitizeMultipleGridText((string) $atts['multiplegridtext']) : '',
             'multiplegridusersearch' => $this->isTruthy((string) $atts['multiplegridusersearch']),
             'multiplegridperpage' => max(1, (int) ($atts['multiplegridperpage'] ?: 12)),
+            'multiplegridmaxpages' => (int) ($atts['multiplegridmaxpages'] ?? 0) > 0 ? (int) $atts['multiplegridmaxpages'] : 0,
             'nostyling' => $this->isTruthy((string) $atts['nostyling']),
             'noresults' => sanitize_text_field((string) $atts['noresults']),
             'podcastplayermode' => (string) $atts['podcastplayermode'],
@@ -1428,16 +1430,18 @@ final class Shortcode
     {
         $atts = is_array($atts) ? $atts : [];
         $atts = shortcode_atts([
-            'playlist_name'   => '',
-            'media_platform'  => 'youtube',
-            'placeholder'     => 'Search...',
-            'searchbyenabled' => 'true',
+            'playlist_name'     => '',
+            'media_platform'    => 'youtube',
+            'placeholder'       => 'Search...',
+            'searchbyenabled'   => 'true',
+            'clearsearchbutton' => 'true',
         ], $atts, 'media-api-widget-grid-search');
 
-        $playlistName    = sanitize_key((string) $atts['playlist_name']);
-        $mediaType       = sanitize_key((string) $atts['media_platform']);
-        $placeholder     = sanitize_text_field((string) $atts['placeholder']);
-        $searchByEnabled = filter_var($atts['searchbyenabled'], FILTER_VALIDATE_BOOLEAN);
+        $playlistName      = sanitize_key((string) $atts['playlist_name']);
+        $mediaType         = sanitize_key((string) $atts['media_platform']);
+        $placeholder       = sanitize_text_field((string) $atts['placeholder']);
+        $searchByEnabled   = filter_var($atts['searchbyenabled'], FILTER_VALIDATE_BOOLEAN);
+        $clearButtonEnabled = filter_var($atts['clearsearchbutton'], FILTER_VALIDATE_BOOLEAN);
 
         if ($playlistName === '' || $mediaType === '') {
             return '';
@@ -1457,9 +1461,14 @@ final class Shortcode
 
         $inputId = 'maw-search-input-' . $fieldId;
 
+        $clearButtonHtml = $clearButtonEnabled
+            ? '<button type="button" class="maw-search-clear" aria-label="' . esc_attr__('Clear search', 'media-api-widget') . '">&times;</button>'
+            : '';
+
         return
             '<div class="maw-grid-search-bar" data-maw-for="' . esc_attr($gridId) . '">' .
                 '<input type="text" id="' . esc_attr($inputId) . '" name="' . esc_attr($inputId) . '" class="maw-search-input" placeholder="' . esc_attr($placeholder) . '" aria-label="' . esc_attr__('Search', 'media-api-widget') . '">' .
+                $clearButtonHtml .
                 $selectHtml .
             '</div>';
     }
@@ -1511,6 +1520,7 @@ final class Shortcode
         $showall          = (bool) ($gridConfig['showall'] ?? false);
         $noresults        = sanitize_text_field((string) ($gridConfig['noresults'] ?? ''));
         $noStyling        = (bool) ($gridConfig['noStyling'] ?? false);
+        $maxPages         = (int) ($gridConfig['maxPages'] ?? 0);
         $settings['noStyling'] = $noStyling;
 
         $mediaConfig = $this->findMediaConfig($playlistName, $mediaType);
@@ -1557,7 +1567,11 @@ final class Shortcode
 
         $total      = count($renderData);
         $totalPages = max(1, (int) ceil($total / $perPage));
-        $offset     = ($page - 1) * $perPage;
+        if ($maxPages > 0) {
+            $totalPages = min($totalPages, $maxPages);
+        }
+        $page   = min($page, $totalPages);
+        $offset = ($page - 1) * $perPage;
         $pageData   = array_slice($renderData, $offset, $perPage);
 
         $gridSettings = $settings;
@@ -1609,6 +1623,7 @@ final class Shortcode
     private function renderUserSearchGrid(array $renderData, array $itemData, array $settings, string $playlistName, string $mediaType): string
     {
         $perPage      = (int) $itemData['multiplegridperpage'];
+        $maxPages     = (int) ($itemData['multiplegridmaxpages'] ?? 0);
         $gap          = (string) $itemData['multiplegridgap'];
         $minsize      = (string) $itemData['multiplegridminsize'];
         $gridtext     = (string) $itemData['multiplegridtext'];
@@ -1623,7 +1638,7 @@ final class Shortcode
             $gridSettings['multipleGridText'] = $gridtext;
         }
 
-        $gridKey = substr(md5(wp_json_encode($gridSettings) . $playlistName . $mediaType . $gap . $minsize . $episodeRange . (string) $perPage), 0, 16);
+        $gridKey = substr(md5(wp_json_encode($gridSettings) . $playlistName . $mediaType . $gap . $minsize . $episodeRange . (string) $perPage . (string) $maxPages), 0, 16);
         set_transient('maw_grid_' . $gridKey, [
             'settings'         => $gridSettings,
             'gap'              => $gap,
@@ -1633,6 +1648,7 @@ final class Shortcode
             'showall'          => $showall,
             'noresults'        => $noresults,
             'noStyling'        => $noStyling,
+            'maxPages'         => $maxPages,
         ], 86400);
 
         $filteredData = $renderData;
@@ -1647,6 +1663,9 @@ final class Shortcode
 
         $total      = count($filteredData);
         $totalPages = max(1, (int) ceil($total / $perPage));
+        if ($maxPages > 0) {
+            $totalPages = min($totalPages, $maxPages);
+        }
         $pageData   = array_slice($filteredData, 0, $perPage);
 
         $gridHtml = '';

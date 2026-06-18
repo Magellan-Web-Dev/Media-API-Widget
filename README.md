@@ -357,6 +357,7 @@ When `multiplegridusersearch="true"` is set on `[media-api-widget-render]`, the 
 - The initial page is server-rendered — no AJAX on first load.
 - Typing in the search bar triggers a debounced (400 ms) AJAX request that filters and re-renders the grid items.
 - The search bar dropdown lets visitors search by **Any** (matches title or description), **Title**, or **Description**. Set `searchbyenabled="false"` on the `[media-api-widget-grid-search]` shortcode to hide the dropdown — the search will always match across both fields.
+- A clear button is shown next to the search input by default. Clicking it clears the input, immediately fires the same AJAX request that an empty search would trigger, and returns focus to the input so visitors can type again without clicking. Set `clearsearchbutton="false"` to hide it.
 - Clicking Prev / page number / Next buttons also fires an AJAX request.
 - While any AJAX request is in flight, the wrapper element receives a `loading` CSS class (grid items and pagination become semi-transparent and non-interactive).
 - The `[media-api-widget-grid-search]` shortcode can be placed anywhere on the page — it links to the matching grid via `playlist_name` + `media_platform`.
@@ -376,6 +377,8 @@ When `multiplegridusersearch="true"` is set on `[media-api-widget-render]`, the 
     multiplegridminsize="300px"
 ]
 ```
+
+Use `multiplegridmaxpages` to cap how many pages appear in the pagination. For example, `multiplegridmaxpages="5"` means visitors will never see more than 5 pages regardless of how many items match. Omit the attribute (or leave it empty) for no limit.
 
 > `multiplegridusersearch` and `multiplegrid` are mutually exclusive — when `multiplegridusersearch="true"`, the standard static grid path is bypassed entirely. All other existing grid attributes (`multiplegridgap`, `multiplegridminsize`, `multiplegridtext`, `multiplegridepisoderange`, etc.) continue to work as filters and display options within this mode.
 
