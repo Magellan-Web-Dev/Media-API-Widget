@@ -140,6 +140,7 @@ final class Shortcode
             'multiplegridusersearch' => 'false',
             'multiplegridperpage' => '12',
             'multiplegridmaxpages' => '',
+            'multiplegridmaxpagedisplay' => '',
             'nostyling' => 'false',
             'noresults' => '',
             'podcastplayermode' => '',
@@ -215,6 +216,7 @@ final class Shortcode
             'multiplegridusersearch' => $this->isTruthy((string) $atts['multiplegridusersearch']),
             'multiplegridperpage' => max(1, (int) ($atts['multiplegridperpage'] ?: 12)),
             'multiplegridmaxpages' => (int) ($atts['multiplegridmaxpages'] ?? 0) > 0 ? (int) $atts['multiplegridmaxpages'] : 0,
+            'multiplegridmaxpagedisplay' => (int) ($atts['multiplegridmaxpagedisplay'] ?? 0) > 0 ? (int) $atts['multiplegridmaxpagedisplay'] : 0,
             'nostyling' => $this->isTruthy((string) $atts['nostyling']),
             'noresults' => sanitize_text_field((string) $atts['noresults']),
             'podcastplayermode' => (string) $atts['podcastplayermode'],
@@ -1567,6 +1569,7 @@ final class Shortcode
         $noresults        = sanitize_text_field((string) ($gridConfig['noresults'] ?? ''));
         $noStyling        = (bool) ($gridConfig['noStyling'] ?? false);
         $maxPages         = (int) ($gridConfig['maxPages'] ?? 0);
+        $maxDisplay       = (int) ($gridConfig['maxDisplay'] ?? 0);
         $settings['noStyling'] = $noStyling;
 
         $mediaConfig = $this->findMediaConfig($playlistName, $mediaType);
@@ -1646,7 +1649,7 @@ final class Shortcode
 
         wp_send_json_success([
             'html'        => $gridWrapperHtml,
-            'pagination'  => $this->renderPaginationHtml($page, $totalPages, $baseUrl, $pageParam),
+            'pagination'  => $this->renderPaginationHtml($page, $totalPages, $baseUrl, $pageParam, $maxDisplay),
             'total'       => $total,
             'page'        => $page,
             'total_pages' => $totalPages,
@@ -1672,6 +1675,7 @@ final class Shortcode
     {
         $perPage      = (int) $itemData['multiplegridperpage'];
         $maxPages     = (int) ($itemData['multiplegridmaxpages'] ?? 0);
+        $maxDisplay   = (int) ($itemData['multiplegridmaxpagedisplay'] ?? 0);
         $gap          = (string) $itemData['multiplegridgap'];
         $minsize      = (string) $itemData['multiplegridminsize'];
         $gridtext     = (string) $itemData['multiplegridtext'];
@@ -1686,7 +1690,7 @@ final class Shortcode
             $gridSettings['multipleGridText'] = $gridtext;
         }
 
-        $gridKey = substr(md5(wp_json_encode($gridSettings) . $playlistName . $mediaType . $gap . $minsize . $episodeRange . (string) $perPage . (string) $maxPages), 0, 16);
+        $gridKey = substr(md5(wp_json_encode($gridSettings) . $playlistName . $mediaType . $gap . $minsize . $episodeRange . (string) $perPage . (string) $maxPages . (string) $maxDisplay), 0, 16);
         set_transient('maw_grid_' . $gridKey, [
             'settings'         => $gridSettings,
             'gap'              => $gap,
@@ -1697,6 +1701,7 @@ final class Shortcode
             'noresults'        => $noresults,
             'noStyling'        => $noStyling,
             'maxPages'         => $maxPages,
+            'maxDisplay'       => $maxDisplay,
         ], 86400);
 
         $filteredData = $renderData;
@@ -1753,16 +1758,23 @@ final class Shortcode
                 ' data-maw-page-param="' . esc_attr($pageParam) . '"' .
             '>' .
                 '<div class="maw-grid-items">' . $gridLayoutHtml . '</div>' .
-                '<div class="maw-grid-pagination">' . $this->renderPaginationHtml($page, $totalPages, $baseUrl, $pageParam) . '</div>' .
+                '<div class="maw-grid-pagination">' . $this->renderPaginationHtml($page, $totalPages, $baseUrl, $pageParam, $maxDisplay) . '</div>' .
             '</div>';
     }
 
     /**
      * Renders prev/page-number/next pagination HTML.
      *
-     * Returns an empty string when $totalPages <= 1. Shows up to 5 page
-     * numbers centred on the current page, with ellipsis for gaps, and
-     * always includes the first and last page links.
+     * Returns an empty string when $totalPages <= 1.
+     *
+     * Two display modes:
+     * - Default ($maxDisplay <= 0): lists every page number (1..$totalPages)
+     *   with no ellipsis truncation.
+     * - Windowed ($maxDisplay > 0): shows at most $maxDisplay page numbers
+     *   centred on the current page, with no fixed first/last anchors. The
+     *   ellipsis on each side (shown only when pages exist beyond the window) is
+     *   a navigable control that jumps one "set" — i.e. $maxDisplay pages — in
+     *   that direction, so every page stays reachable without flooding the bar.
      *
      * When $baseUrl and $pageParam are supplied, navigable controls are
      * rendered as crawlable <a href> links (page 1 drops the param so it maps
@@ -1775,9 +1787,10 @@ final class Shortcode
      * @param int    $totalPages  Total number of pages.
      * @param string $baseUrl     Page URL used to build link hrefs.
      * @param string $pageParam   Query-arg name holding the page number.
+     * @param int    $maxDisplay  Max numbered buttons to show (0 = default mode).
      * @return string HTML string of pagination controls.
      */
-    private function renderPaginationHtml(int $currentPage, int $totalPages, string $baseUrl = '', string $pageParam = ''): string
+    private function renderPaginationHtml(int $currentPage, int $totalPages, string $baseUrl = '', string $pageParam = '', int $maxDisplay = 0): string
     {
         if ($totalPages <= 1) {
             return '';
@@ -1816,28 +1829,52 @@ final class Shortcode
             ? $staticControl('maw-page-prev', 'Prev', false)
             : $control($currentPage - 1, 'maw-page-prev', 'Prev', 'prev');
 
-        $range = 2;
-        $start = max(1, $currentPage - $range);
-        $end   = min($totalPages, $currentPage + $range);
-
-        if ($start > 1) {
-            $html .= $control(1, 'maw-page-num', '1');
-            if ($start > 2) {
-                $html .= '<span class="maw-page-ellipsis">&hellip;</span>';
+        // Windowed mode: a fixed-width sliding window of $maxDisplay numbers with
+        // clickable "set jump" ellipses, and no first/last anchors. Falls through
+        // to the default centred-with-anchors behavior when $maxDisplay <= 0 or
+        // every page already fits inside the window.
+        if ($maxDisplay > 0 && $totalPages > $maxDisplay) {
+            // Centre the window on the current page, then clamp so it always
+            // shows exactly $maxDisplay numbers even at the first/last pages.
+            $start = $currentPage - intdiv($maxDisplay - 1, 2);
+            if ($start < 1) {
+                $start = 1;
             }
+            $end = $start + $maxDisplay - 1;
+            if ($end > $totalPages) {
+                $end   = $totalPages;
+                $start = $totalPages - $maxDisplay + 1;
+            }
+
+            // Leading ellipsis jumps back one full set ($maxDisplay pages).
+            if ($start > 1) {
+                $html .= $control(max(1, $currentPage - $maxDisplay), 'maw-page-ellipsis maw-page-ellipsis-prev', '…');
+            }
+
+            for ($i = $start; $i <= $end; $i++) {
+                $html .= $i === $currentPage
+                    ? $staticControl('maw-page-num active', (string) $i, true)
+                    : $control($i, 'maw-page-num', (string) $i);
+            }
+
+            // Trailing ellipsis jumps forward one full set ($maxDisplay pages).
+            if ($end < $totalPages) {
+                $html .= $control(min($totalPages, $currentPage + $maxDisplay), 'maw-page-ellipsis maw-page-ellipsis-next', '…');
+            }
+
+            $html .= $currentPage >= $totalPages
+                ? $staticControl('maw-page-next', 'Next', false)
+                : $control($currentPage + 1, 'maw-page-next', 'Next', 'next');
+
+            return $html;
         }
 
-        for ($i = $start; $i <= $end; $i++) {
+        // Default mode: list every page number with no ellipsis truncation.
+        // Set multiplegridmaxpagedisplay to switch to the compact windowed bar.
+        for ($i = 1; $i <= $totalPages; $i++) {
             $html .= $i === $currentPage
                 ? $staticControl('maw-page-num active', (string) $i, true)
                 : $control($i, 'maw-page-num', (string) $i);
-        }
-
-        if ($end < $totalPages) {
-            if ($end < $totalPages - 1) {
-                $html .= '<span class="maw-page-ellipsis">&hellip;</span>';
-            }
-            $html .= $control($totalPages, 'maw-page-num', (string) $totalPages);
         }
 
         $html .= $currentPage >= $totalPages

@@ -331,6 +331,7 @@ Enable grid mode to display multiple media items in a responsive CSS grid.
 | `multiplegridtext` | _(none)_ | Show text below each grid item: `title`, `description`, `both`, `numberedtitle`, or `numberedtitleanddescription`. YouTube only. The `numberedtitle` options require the playlist's sort mode to be "Number in title": they display `Episode N` (or `Season S, Episode N` when the season/episode regex is set), falling back to the plain title for items without a detected number. `numberedtitleanddescription` also appends the description, like `both`. |
 | `multiplegridusersearch` | `false` | Set to `true` to enable the user-searchable + paginated grid mode. See [Grid Search & Pagination](#grid-search--pagination). |
 | `multiplegridperpage` | `12` | Max items per page when `multiplegridusersearch="true"`. |
+| `multiplegridmaxpagedisplay` | _(none)_ | Cap how many numbered page buttons show at once (a sliding window centred on the current page). A clickable `…` on each side jumps one set (this many pages), keeping all pages reachable. Omit/empty to list every page number with no `…`. |
 | `noresults` | _(none)_ | Text shown when a user search yields no results (user-search grid only). Falls back to a generic message when empty. |
 | `nostyling` | `false` | Set to `true` to suppress the plugin's **styling** class names (`media_item`, `media-item-*`, `media_items_multiple_grid_layout`, …) so you don't inherit the plugin's built-in CSS. The namespaced `maw-` **hook classes** (see [Styling Hooks](#styling-hooks)) are still emitted either way. Data attributes used by the lightbox JS are unaffected. |
 
@@ -379,6 +380,8 @@ When `multiplegridusersearch="true"` is set on `[media-api-widget-render]`, the 
 ```
 
 Use `multiplegridmaxpages` to cap how many pages appear in the pagination. For example, `multiplegridmaxpages="5"` means visitors will never see more than 5 pages regardless of how many items match. Omit the attribute (or leave it empty) for no limit.
+
+Use `multiplegridmaxpagedisplay` to limit how many numbered page buttons are visible at once when a playlist has many pages. For example, `multiplegridmaxpagedisplay="4"` renders a sliding window of at most 4 numbers centred on the current page (e.g. `Prev … 7 8 9 10 … Next`). The `…` on each side is clickable and jumps one set — 4 pages — in that direction, so every page stays reachable without crowding the bar with dozens of numbers. Omit (or leave empty) to list every page number with no `…` truncation (the default). This pairs naturally with a large or uncapped `multiplegridmaxpages`.
 
 > `multiplegridusersearch` and `multiplegrid` are mutually exclusive — when `multiplegridusersearch="true"`, the standard static grid path is bypassed entirely. All other existing grid attributes (`multiplegridgap`, `multiplegridminsize`, `multiplegridtext`, `multiplegridepisoderange`, etc.) continue to work as filters and display options within this mode.
 

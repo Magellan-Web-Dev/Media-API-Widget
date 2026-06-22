@@ -366,6 +366,7 @@ final class AboutPage
                         <tr><td><code>multiplegridusersearch</code></td><td><code>false</code></td><td>Set to <code>true</code> to enable the user-searchable + paginated grid mode. See <a href="#maw-grid-search">Grid Search &amp; Pagination</a>.</td></tr>
                         <tr><td><code>multiplegridperpage</code></td><td><code>12</code></td><td>Max items per page when <code>multiplegridusersearch="true"</code>.</td></tr>
                         <tr><td><code>multiplegridmaxpages</code></td><td>—</td><td>Cap the maximum number of pagination pages when <code>multiplegridusersearch="true"</code>. Omit or leave empty for no limit.</td></tr>
+                        <tr><td><code>multiplegridmaxpagedisplay</code></td><td>—</td><td>Cap how many numbered page buttons show at once (a sliding window centred on the current page). A clickable <code>&hellip;</code> on each side jumps one set (this many pages) so all pages stay reachable. Omit or leave empty to list every page number with no <code>&hellip;</code>.</td></tr>
                         <tr><td><code>noresults</code></td><td>—</td><td>Text shown when a user search yields no results (user-search grid only). Falls back to a generic message when empty.</td></tr>
                     </tbody>
                 </table>
@@ -406,6 +407,7 @@ final class AboutPage
                     <li>The search bar shortcode can be placed anywhere on the page — it does not need to be adjacent to the grid.</li>
                     <li>Use <code>noresults="..."</code> to set custom text that appears when a search returns zero items.</li>
                     <li>Use <code>multiplegridmaxpages="N"</code> to cap the pagination to at most <em>N</em> pages. Omit the attribute for no limit.</li>
+                    <li>Use <code>multiplegridmaxpagedisplay="N"</code> to show at most <em>N</em> numbered page buttons at a time (a sliding window). A clickable <code>&hellip;</code> appears on each side that has more pages and jumps one set (<em>N</em> pages) in that direction, keeping every page reachable without crowding the bar. Pairs well with a large or uncapped <code>multiplegridmaxpages</code>.</li>
                 </ul>
 
                 <div class="maw-callout">
