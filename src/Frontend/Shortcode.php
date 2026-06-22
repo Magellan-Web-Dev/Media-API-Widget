@@ -1005,15 +1005,19 @@ final class Shortcode
     }
 
     /**
-     * Renders a title or description text block below a grid item.
+     * Renders a title and/or description text block below a grid item.
      *
-     * Returns a `<div>` with the item's title or description text when `$mode`
-     * is 'title' or 'description' respectively and the text is non-empty.
-     * Returns '' for any other mode value or when the text is empty.
+     * Supported modes:
+     * - 'title' / 'description' — the item's title or description text.
+     * - 'both' — both title and description.
+     * - 'numberedtitle' — episode/season-aware title (see {@see self::numberedTitleText()}).
+     * - 'numberedtitleanddescription' — the numbered title plus the description.
+     *
+     * Returns '' for any other mode value or when the resulting text is empty.
      *
      * @param array<string,mixed> $item The normalized media item.
-     * @param string              $mode 'title' or 'description'.
-     * @return string HTML `<div>` block, or ''.
+     * @param string              $mode One of the supported mode strings.
+     * @return string HTML `<div>` block(s), or ''.
      */
     private function renderMultipleGridText(array $item, string $mode, bool $noStyling = false): string
     {
@@ -1039,6 +1043,19 @@ final class Shortcode
             return $out;
         }
 
+        if ($mode === 'numberedtitle' || $mode === 'numberedtitleanddescription') {
+            $titleText = $this->numberedTitleText($item);
+            $descText  = trim((string) ($item['description'] ?? ''));
+            $out = '';
+            if ($titleText !== '') {
+                $out .= '<div' . $cls('title') . '>' . esc_html($titleText) . '</div>';
+            }
+            if ($mode === 'numberedtitleanddescription' && $descText !== '') {
+                $out .= '<div' . $cls('description') . '>' . esc_html($descText) . '</div>';
+            }
+            return $out;
+        }
+
         $text = '';
         if ($mode === 'title') {
             $text = trim((string) ($item['title'] ?? ''));
@@ -1051,6 +1068,33 @@ final class Shortcode
         }
 
         return '<div' . $cls($mode) . '>' . esc_html($text) . '</div>';
+    }
+
+    /**
+     * Builds the episode/season-aware title text for a numbered grid item.
+     *
+     * Mirrors how the playlist resolves numbering: when the item has no episode
+     * number (episode === -1, i.e. the playlist's sort mode is "Normal" or no
+     * number was detected), the plain video title is returned. When an episode
+     * number is present and a valid season was parsed via the season/episode
+     * regex, returns "Season {s}, Episode {e}"; otherwise returns "Episode {e}".
+     *
+     * @param array<string,mixed> $item The normalized media item.
+     * @return string The display title text (unescaped; caller must escape).
+     */
+    private function numberedTitleText(array $item): string
+    {
+        $episode = isset($item['episode']) ? (int) $item['episode'] : -1;
+        if ($episode === -1) {
+            return trim((string) ($item['title'] ?? ''));
+        }
+
+        $season = isset($item['season']) ? (int) $item['season'] : -1;
+        if ($season !== -1) {
+            return 'Season ' . $season . ', Episode ' . $episode;
+        }
+
+        return 'Episode ' . $episode;
     }
 
     /**
@@ -1131,18 +1175,19 @@ final class Shortcode
     /**
      * Validates and normalizes the multiplegridtext attribute value.
      *
-     * Returns 'title' or 'description' when the trimmed, lowercased value
-     * matches either of those strings. Returns '' for any other value, which
+     * Returns the value when the trimmed, lowercased input matches one of the
+     * supported modes ('title', 'description', 'both', 'numberedtitle',
+     * 'numberedtitleanddescription'). Returns '' for any other value, which
      * disables the grid text feature.
      *
      * @param string $value Raw attribute value.
-     * @return string 'title', 'description', or ''.
+     * @return string A supported mode string, or ''.
      */
     private function sanitizeMultipleGridText(string $value): string
     {
         $v = strtolower(trim($value));
         return match($v) {
-            'title', 'description', 'both' => $v,
+            'title', 'description', 'both', 'numberedtitle', 'numberedtitleanddescription' => $v,
             default                        => '',
         };
     }

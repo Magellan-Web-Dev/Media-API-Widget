@@ -81,6 +81,53 @@ final class MediaContent
     }
 
     /**
+     * Extracts a season and episode number from a title using a custom regex.
+     *
+     * This powers the optional "Use season/episode regex" mode. The supplied
+     * pattern is written without delimiters; capture group 1 is treated as the
+     * season and capture group 2 as the episode. Named groups 'season' and
+     * 'episode' (PCRE `(?'name'...)` syntax) are honored when present and take
+     * precedence over the positional groups. The pattern is matched
+     * case-insensitively, so "S5E14", "s5e14", and "TWCS5E14" all resolve.
+     *
+     * Falls back gracefully: when the pattern is invalid, empty, or does not
+     * match the title, the season is returned as -1 and the episode is resolved
+     * via {@see self::episodeNumberGenerator()} so behavior degrades to the
+     * default episode-only numbering rather than breaking the playlist.
+     *
+     * @param string $title The video title to parse (e.g. "TWCS5E14").
+     * @param string $regex The user-supplied regex pattern, without delimiters.
+     * @return array{season:int,episode:int} Parsed season and episode numbers.
+     */
+    public static function seasonEpisodeGenerator(string $title, string $regex): array
+    {
+        $fallback = ['season' => -1, 'episode' => self::episodeNumberGenerator($title)];
+
+        if ($regex === '') {
+            return $fallback;
+        }
+
+        // Wrap the user pattern in tilde delimiters with a case-insensitive
+        // flag. Escape any literal tildes so they cannot terminate the pattern
+        // early. Invalid patterns make preg_match() return false; suppress the
+        // warning and degrade to episode-only numbering in that case.
+        $delimited = '~' . str_replace('~', '\~', $regex) . '~i';
+        $result    = @preg_match($delimited, $title, $matches);
+
+        if ($result !== 1) {
+            return $fallback;
+        }
+
+        $season  = $matches['season']  ?? ($matches[1] ?? null);
+        $episode = $matches['episode'] ?? ($matches[2] ?? null);
+
+        return [
+            'season'  => ($season !== null && $season !== '') ? (int) $season : -1,
+            'episode' => ($episode !== null && $episode !== '') ? (int) $episode : self::episodeNumberGenerator($title),
+        ];
+    }
+
+    /**
      * Logs a single API call event to the stats table.
      *
      * Delegates to {@see \MediaApiWidget\Stats\ApiCallLogger::log()} after
@@ -288,6 +335,8 @@ final class MediaContent
             'api_key' => $params['api_key'] ?? null,
             'media_data' => $params['media_data'] ?? null,
             'sort_mode' => $params['sort_mode'] ?? 'normal',
+            'season_episode_regex_enabled' => $params['season_episode_regex_enabled'] ?? false,
+            'season_episode_regex' => $params['season_episode_regex'] ?? '',
             'load_full_playlist' => $params['load_full_playlist'] ?? false,
             'cookie_name' => $params['cookie_name'] ?? null,
             'cookie_expired' => $params['cookie_expired'] ?? true,
@@ -364,6 +413,14 @@ final class MediaContent
         $mediaData                     = $config['media_data'];
         $sortMode                      = $config['sort_mode'];
         $loadFullPlaylist              = $config['load_full_playlist'];
+
+        // Season/episode regex mode is only active when sort_mode is
+        // 'number_in_title', the checkbox is enabled, and a non-empty pattern
+        // is set. When inactive, the legacy episode-only path runs unchanged.
+        $seasonEpisodeRegex = trim((string) ($config['season_episode_regex'] ?? ''));
+        $useSeasonEpisode   = $sortMode === 'number_in_title'
+            && !empty($config['season_episode_regex_enabled'])
+            && $seasonEpisodeRegex !== '';
         $mediaCacheTtl                 = (int) $config['media_cache_ttl'];
         $youtubeRequestInProgressTtl   = (int) $config['youtube_request_in_progress_ttl'];
         $youtubeBackupWindowSeconds    = (int) $config['youtube_backup_window_seconds'];
@@ -438,7 +495,10 @@ final class MediaContent
         // Combine All Youtube Video Items Together From While Loop If Looped Through
         $youtubeData['items'] = $youtubeItems;
 
-        // Used to check if episode number already retrieved
+        // Used to check if an episode (or season/episode pair) was already
+        // retrieved, so duplicate uploads of the same numbered episode are
+        // collapsed. In season mode the key combines season and episode so
+        // that e.g. S5E14 and S6E14 are kept as distinct items.
         $youtubeEpisodeNumberCollected = [];
 
         // Loop Through Video Items And Parse Accordingly
@@ -448,7 +508,16 @@ final class MediaContent
                 if ($item['snippet']) {
                     $snippet = $item['snippet'];
                     if ($snippet['title'] !== '') {
-                        if ($sortMode === 'number_in_title') {
+                        if ($useSeasonEpisode) {
+                            $parsed        = self::seasonEpisodeGenerator($snippet['title'], $seasonEpisodeRegex);
+                            $dedupKey      = $parsed['season'] . '_' . $parsed['episode'];
+                            if (in_array($dedupKey, $youtubeEpisodeNumberCollected, true)) {
+                                continue;
+                            }
+                            $itemOutput['season']  = $parsed['season'];
+                            $itemOutput['episode'] = $parsed['episode'];
+                            array_push($youtubeEpisodeNumberCollected, $dedupKey);
+                        } else if ($sortMode === 'number_in_title') {
                             $episodeNumber = self::episodeNumberGenerator($snippet['title']);
                             if (in_array($episodeNumber, $youtubeEpisodeNumberCollected)) {
                                 continue;
@@ -507,8 +576,14 @@ final class MediaContent
             }
         }
 
-        // If $sortMode Was Set To "number_in_title", Sort List Based Upon Episode Number Generated
-        if ($sortMode === 'number_in_title') {
+        // If $sortMode Was Set To "number_in_title", Sort List Based Upon Episode Number Generated.
+        // In season/episode regex mode, sort by season first (descending), then
+        // episode (descending), so newer seasons lead and episodes order within them.
+        if ($useSeasonEpisode) {
+            $seasonValues  = array_column($state['parsedData'], 'season');
+            $episodeValues = array_column($state['parsedData'], 'episode');
+            array_multisort($seasonValues, SORT_DESC, $episodeValues, SORT_DESC, $state['parsedData']);
+        } else if ($sortMode === 'number_in_title') {
             $keyValues = array_column($state['parsedData'], 'episode');
             array_multisort($keyValues, SORT_DESC, $state['parsedData']);
         }

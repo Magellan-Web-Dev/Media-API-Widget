@@ -194,6 +194,8 @@ final class SettingsPage
         $apiKey          = $item['api_key'] ?? '';
         $mediaData       = $item['media_data'] ?? '';
         $sortMode        = $item['sort_mode'] ?? 'normal';
+        $seRegexEnabled  = !empty($item['season_episode_regex_enabled']);
+        $seRegex         = $item['season_episode_regex'] ?? '';
         $loadFull        = !empty($item['load_full_playlist']);
         $podcastPlatform = $item['podcast_platform'] ?? 'custom';
 
@@ -227,12 +229,19 @@ final class SettingsPage
                 <div data-maw-fields="youtube"<?= $ytStyle ?>>
                     <p><label>Playlist ID<br><input type="text" name="<?= esc_attr($nameBase . '[media_data]') ?>" data-maw-name="<?= esc_attr($dataBase . '[media_data]') ?>" value="<?= esc_attr($type === 'youtube' ? $mediaData : '') ?>"<?= $ytDisabled ?> /></label></p>
                     <p><label>API key<br><input type="text" name="<?= esc_attr($nameBase . '[api_key]') ?>" data-maw-name="<?= esc_attr($dataBase . '[api_key]') ?>" value="<?= esc_attr($type === 'youtube' ? $apiKey : '') ?>" /></label></p>
-                    <p><label>Sort mode (For TV shows from the Magellan Youtube, use "Number in title")<br><select name="<?= esc_attr($nameBase . '[sort_mode]') ?>" data-maw-name="<?= esc_attr($dataBase . '[sort_mode]') ?>">
+                    <p><label>Sort mode (For TV shows from the Magellan Youtube, use "Number in title")<br><select name="<?= esc_attr($nameBase . '[sort_mode]') ?>" data-maw-name="<?= esc_attr($dataBase . '[sort_mode]') ?>" data-maw-sort-mode="1">
                         <?php foreach (['normal' => 'Normal', 'number_in_title' => 'Number in title'] as $v => $label) : ?>
                             <?php $sel = (($type === 'youtube' ? $sortMode : 'normal') === $v) ? 'selected' : ''; ?>
                             <option value="<?= esc_attr($v) ?>" <?= $sel ?>><?= esc_html($label) ?></option>
                         <?php endforeach; ?>
                     </select></label></p>
+                    <?php $seBlockHidden = ($type === 'youtube' && $sortMode === 'number_in_title') ? '' : ' style="display:none"'; ?>
+                    <div data-maw-season-episode="1"<?= $seBlockHidden ?>>
+                        <p><label><input type="checkbox" name="<?= esc_attr($nameBase . '[season_episode_regex_enabled]') ?>" data-maw-name="<?= esc_attr($dataBase . '[season_episode_regex_enabled]') ?>" value="1" data-maw-se-toggle="1" <?= ($type === 'youtube' && $seRegexEnabled) ? 'checked' : '' ?> /> Use season/episode regex (Used for determining season and episode.  If nothing set, default episode only numbering will be used)</label></p>
+                        <?php $seRegexHidden = ($type === 'youtube' && $seRegexEnabled) ? '' : ' style="display:none"'; ?>
+                        <p data-maw-se-regex-wrap="1"<?= $seRegexHidden ?>><label>Season/episode regex<br><input type="text" name="<?= esc_attr($nameBase . '[season_episode_regex]') ?>" data-maw-name="<?= esc_attr($dataBase . '[season_episode_regex]') ?>" value="<?= esc_attr($type === 'youtube' ? $seRegex : '') ?>" placeholder="S(\d+)E(\d+)" /></label>
+                        <span class="description">Capture group 1 = season, group 2 = episode. Example: <code>S(\d+)E(\d+)</code> matches "TWCS5E14" as season 5, episode 14. Matched case-insensitively. Items are sorted by season then episode (descending). Titles that don't match fall back to episode-only numbering.</span></p>
+                    </div>
                     <p><label><input type="checkbox" name="<?= esc_attr($nameBase . '[load_full_playlist]') ?>" data-maw-name="<?= esc_attr($dataBase . '[load_full_playlist]') ?>" value="1" <?= ($type === 'youtube' && $loadFull) ? 'checked' : '' ?> /> Load full playlist (otherwise first 6)</label></p>
                 </div>
 
@@ -336,6 +345,15 @@ final class SettingsPage
                 'media_data' => isset($item['media_data']) ? trim(sanitize_text_field((string) $item['media_data'])) : null,
                 'api_key' => isset($item['api_key']) ? trim(sanitize_text_field((string) $item['api_key'])) : null,
                 'sort_mode' => isset($item['sort_mode']) ? sanitize_key((string) $item['sort_mode']) : 'normal',
+                'season_episode_regex_enabled' => !empty($item['season_episode_regex_enabled']),
+                // Preserve regex metacharacters (including angle brackets used by
+                // named groups), so do NOT run this through sanitize_text_field,
+                // which would strip tag-like sequences. wp_unslash() first because
+                // WordPress slash-escapes all $_POST data (so "\d" arrives as
+                // "\\d"); then trim, drop control characters, and cap the length.
+                'season_episode_regex' => isset($item['season_episode_regex'])
+                    ? substr(preg_replace('/[\x00-\x1F\x7F]/u', '', trim(wp_unslash((string) $item['season_episode_regex']))), 0, 200)
+                    : '',
                 'load_full_playlist' => !empty($item['load_full_playlist']),
                 'podcast_platform' => isset($item['podcast_platform']) ? sanitize_key((string) $item['podcast_platform']) : 'custom',
             ];

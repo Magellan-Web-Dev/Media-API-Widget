@@ -82,7 +82,25 @@
 
 	            function sanitize_multiple_grid_text(value) {
 	                const normalized = String(value ?? "").trim().toLowerCase();
-	                return normalized === "title" || normalized === "description" || normalized === "both" ? normalized : "";
+	                return ["title", "description", "both", "numberedtitle", "numberedtitleanddescription"].includes(normalized) ? normalized : "";
+	            }
+
+	            // Build the episode/season-aware title text for a numbered grid item.
+	            // When the item has no episode number (episode === -1, i.e. the
+	            // playlist's sort mode is "Normal" or no number was detected), the
+	            // plain video title is used. When an episode number is present and a
+	            // valid season was parsed via the season/episode regex, returns
+	            // "Season {s}, Episode {e}"; otherwise returns "Episode {e}".
+	            function numbered_title_text(item) {
+	                const episode = Number(item?.episode);
+	                if (!Number.isFinite(episode) || episode === -1) {
+	                    return String(item?.title ?? "").trim();
+	                }
+	                const season = Number(item?.season);
+	                if (Number.isFinite(season) && season !== -1) {
+	                    return `Season ${season}, Episode ${episode}`;
+	                }
+	                return `Episode ${episode}`;
 	            }
 
 	            function render_multiple_grid_text(item, mode) {
@@ -93,6 +111,15 @@
 	                    let html = "";
 	                    if (title) html += `<div class="media-item-multiple-grid-text media-item-multiple-grid-text-title">${escape_html(title)}</div>`;
 	                    if (description) html += `<div class="media-item-multiple-grid-text media-item-multiple-grid-text-description">${escape_html(description)}</div>`;
+	                    return html;
+	                }
+
+	                if (mode === "numberedtitle" || mode === "numberedtitleanddescription") {
+	                    const title = numbered_title_text(item);
+	                    const description = String(item?.description ?? "").trim();
+	                    let html = "";
+	                    if (title) html += `<div class="media-item-multiple-grid-text media-item-multiple-grid-text-title">${escape_html(title)}</div>`;
+	                    if (mode === "numberedtitleanddescription" && description) html += `<div class="media-item-multiple-grid-text media-item-multiple-grid-text-description">${escape_html(description)}</div>`;
 	                    return html;
 	                }
 

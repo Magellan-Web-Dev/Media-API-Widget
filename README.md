@@ -328,7 +328,7 @@ Enable grid mode to display multiple media items in a responsive CSS grid.
 | `multiplegridepisoderange` | _(none)_ | Show only items whose episode number falls in a range. Format: `1-10`. Overrides search and limit. |
 | `multiplegridgap` | `48px` | CSS `gap` value for the grid. |
 | `multiplegridminsize` | `400px` | Minimum column width in the `auto-fill` grid. |
-| `multiplegridtext` | _(none)_ | Show text below each grid item: `title`, `description`, or `both`. YouTube only. |
+| `multiplegridtext` | _(none)_ | Show text below each grid item: `title`, `description`, `both`, `numberedtitle`, or `numberedtitleanddescription`. YouTube only. The `numberedtitle` options require the playlist's sort mode to be "Number in title": they display `Episode N` (or `Season S, Episode N` when the season/episode regex is set), falling back to the plain title for items without a detected number. `numberedtitleanddescription` also appends the description, like `both`. |
 | `multiplegridusersearch` | `false` | Set to `true` to enable the user-searchable + paginated grid mode. See [Grid Search & Pagination](#grid-search--pagination). |
 | `multiplegridperpage` | `12` | Max items per page when `multiplegridusersearch="true"`. |
 | `noresults` | _(none)_ | Text shown when a user search yields no results (user-search grid only). Falls back to a generic message when empty. |

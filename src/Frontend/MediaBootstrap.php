@@ -115,6 +115,8 @@ final class MediaBootstrap
                 'api_key'          => $item['api_key'] ?? null,
                 'media_data'       => $item['media_data'] ?? null,
                 'sort_mode'        => $item['sort_mode'] ?? 'normal',
+                'season_episode_regex_enabled' => $item['season_episode_regex_enabled'] ?? false,
+                'season_episode_regex' => $item['season_episode_regex'] ?? '',
                 'load_full_playlist' => $item['load_full_playlist'] ?? false,
                 'cookie_name'      => $cookieName,
                 'cookie_expired'   => $cookieExpired,

@@ -14,6 +14,26 @@
     });
   }
 
+  // Show the season/episode block only when sort mode is "Number in title";
+  // hide and reset it otherwise so a stale regex isn't submitted while hidden.
+  function syncSeasonEpisodeForRow(sortSel){
+    var row = sortSel.closest('[data-maw-row]');
+    if(!row) return;
+    var block = row.querySelector('[data-maw-season-episode]');
+    if(!block) return;
+    block.style.display = (sortSel.value === 'number_in_title') ? '' : 'none';
+    var toggle = block.querySelector('[data-maw-se-toggle]');
+    if(toggle) syncSeasonEpisodeRegex(toggle);
+  }
+
+  // Show the regex input only when the "Use season/episode regex" checkbox is on.
+  function syncSeasonEpisodeRegex(toggle){
+    var block = toggle.closest('[data-maw-season-episode]');
+    if(!block) return;
+    var wrap = block.querySelector('[data-maw-se-regex-wrap]');
+    if(wrap) wrap.style.display = toggle.checked ? '' : 'none';
+  }
+
   function addRow(type){
     var tpl = qs('#maw-row-template');
     if(!tpl) return;
@@ -27,6 +47,8 @@
     if(newRow){
       var sel = newRow.querySelector('[data-maw-type-select]');
       if(sel) syncTypeForRow(sel);
+      var sortSel = newRow.querySelector('[data-maw-sort-mode]');
+      if(sortSel) syncSeasonEpisodeForRow(sortSel);
     }
   }
 
@@ -89,6 +111,14 @@
     if(sel){
       syncTypeForRow(sel);
     }
+    var sortSel = e.target.closest('[data-maw-sort-mode]');
+    if(sortSel){
+      syncSeasonEpisodeForRow(sortSel);
+    }
+    var seToggle = e.target.closest('[data-maw-se-toggle]');
+    if(seToggle){
+      syncSeasonEpisodeRegex(seToggle);
+    }
   });
 
   // initial
@@ -96,5 +126,8 @@
   renumberShortcodes();
   qsa('[data-maw-type-select]').forEach(function(sel){
     syncTypeForRow(sel);
+  });
+  qsa('[data-maw-sort-mode]').forEach(function(sortSel){
+    syncSeasonEpisodeForRow(sortSel);
   });
 })();
