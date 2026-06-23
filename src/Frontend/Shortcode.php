@@ -1093,7 +1093,7 @@ final class Shortcode
 
         $season = isset($item['season']) ? (int) $item['season'] : -1;
         if ($season !== -1) {
-            return 'Season ' . $season . ', Episode ' . $episode;
+            return 'Season ' . $season . ' Episode ' . $episode;
         }
 
         return 'Episode ' . $episode;

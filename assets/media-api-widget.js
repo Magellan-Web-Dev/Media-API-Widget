@@ -98,7 +98,7 @@
 	                }
 	                const season = Number(item?.season);
 	                if (Number.isFinite(season) && season !== -1) {
-	                    return `Season ${season}, Episode ${episode}`;
+	                    return `Season ${season} Episode ${episode}`;
 	                }
 	                return `Episode ${episode}`;
 	            }
