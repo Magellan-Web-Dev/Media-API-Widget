@@ -576,15 +576,45 @@ document.addEventListener("mediaApiWidgetItemClick", (e) =&gt; {
                     <thead><tr><th>Setting</th><th>Default</th><th>Description</th></tr></thead>
                     <tbody>
                         <tr><td>Media cache transient TTL</td><td>7,200 s (2 hrs)</td><td>How long server transients and the browser cookie are valid.</td></tr>
-                        <tr><td>YouTube request-in-progress TTL</td><td>600 s (10 min)</td><td>Prevents parallel duplicate YouTube API requests.</td></tr>
+                        <tr><td>YouTube request-in-progress TTL</td><td>600 s (10 min)</td><td>How long the per-playlist refresh lock stays valid before an abandoned one can be reclaimed.</td></tr>
                         <tr><td>YouTube error TTL</td><td>600 s (10 min)</td><td>After a failed YouTube call, blocks a retry for this duration.</td></tr>
                         <tr><td>YouTube backup window</td><td>7,200 s (2 hrs)</td><td>If the last successful fetch was within this window, the backup JSON is served rather than re-calling the API.</td></tr>
+                        <tr><td>YouTube maximum pages per refresh</td><td>20 pages</td><td>Hard ceiling on <code>playlistItems</code> requests during one refresh. Allowed 1&ndash;100.</td></tr>
+                        <tr><td>YouTube daily call limit</td><td>200 calls</td><td>Circuit breaker on total outbound YouTube requests per quota day. Allowed 1&ndash;10,000.</td></tr>
                     </tbody>
                 </table>
 
                 <div class="maw-callout">
                     <strong>YouTube API Quota:</strong> The YouTube Data API allows 10,000 units/day. Each page of 50 playlist items costs 1 unit. A high cache TTL means fewer quota calls. You can clear the cache manually from the <a href="<?php echo esc_url(menu_page_url(Menu::SLUG, false)); ?>">Settings page</a> using the <em>Clear plugin cache</em> button.
                 </div>
+
+                <h3>Runaway Protection</h3>
+                <p>Two independent guards bound how many YouTube requests a single refresh, and a single day, can produce. Both are configured on the <a href="<?php echo esc_url(menu_page_url(Menu::CACHING_SLUG, false)); ?>">Caching page</a>, which also shows read-only status: calls used today, the quota reset date and timezone, and the most recent guard event.</p>
+
+                <h4>Safe pagination</h4>
+                <p>Pagination is driven by YouTube's <code>nextPageToken</code>, never by <code>pageInfo.totalResults</code> &mdash; for <code>playlistItems</code> that total counts deleted and private videos the API will not return, so a loop that waits for the item tally to reach it may never finish. The first request counts as page 1, every token used is remembered, and the refresh is abandoned when any of the following happens:</p>
+                <table class="widefat striped maw-table maw-about-table">
+                    <thead><tr><th>Reason code</th><th>Meaning</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>repeated_page_token</code></td><td>A page token was offered twice, so pagination would have looped.</td></tr>
+                        <tr><td><code>empty_page_with_next_token</code></td><td>A page returned no items yet still supplied another token.</td></tr>
+                        <tr><td><code>malformed_response</code></td><td>The body was not valid JSON, or was missing <code>items</code> / <code>pageInfo</code>.</td></tr>
+                        <tr><td><code>maximum_pages_reached</code></td><td>The configured page ceiling was reached.</td></tr>
+                        <tr><td><code>daily_limit_reached</code></td><td>The daily call budget is spent; nothing was sent.</td></tr>
+                        <tr><td><code>concurrent_refresh</code></td><td>Another worker already held this playlist's refresh lock.</td></tr>
+                        <tr><td><code>http_error</code></td><td>A connection failure or a non-200 status on any page.</td></tr>
+                    </tbody>
+                </table>
+
+                <div class="maw-callout">
+                    <strong>Partial data is never promoted:</strong> the backup JSON file, the transient, and the last-successful-fetch timestamp are replaced only after <em>every</em> requested page completed normally. A refresh that aborts part-way leaves all previously stored data untouched and falls back to it, so a failure can never overwrite a good playlist with a truncated one. Guard diagnostics record only a reason code, playlist slug, page count, and timestamp &mdash; never the API key, request URL, response body, or headers.
+                </div>
+
+                <h4>Daily circuit breaker</h4>
+                <p>Every attempted outbound YouTube <code>playlistItems</code> request is counted before it is sent, including requests that come back as errors, because a failed call can still consume quota. Once the limit is reached no request is sent at all and cached or backup data is served instead. The counter resets at midnight <code>America/Los_Angeles</code>, matching YouTube's own quota day across daylight-saving changes. Podcast, Apple/iTunes, RSS, and plugin-update requests are not counted.</p>
+
+                <h4>Concurrency</h4>
+                <p>Simultaneous cache misses for the same playlist no longer all start fetching. A refresh takes an atomic per-playlist lock (a <code>maw_yt_lock_{playlist_name}</code> row created by a bare insert, so the database's unique-name constraint does the arbitration) carrying an owner token and expiry. Only the owner can release it, the release runs on every exit path including thrown exceptions, and a lock left behind by a worker that died mid-refresh is reclaimed once it expires &mdash; so a stale lock can never block refreshes permanently.</p>
             </section>
 
         </div>
@@ -619,6 +649,7 @@ document.addEventListener("mediaApiWidgetItemClick", (e) =&gt; {
             border-bottom: 2px solid #2271b1;
         }
         .maw-section h3 { font-size: 1.1em; margin-top: 24px; margin-bottom: 8px; }
+        .maw-section h4 { font-size: 1em; margin-top: 20px; margin-bottom: 6px; }
         .maw-about-table th { font-weight: 600; white-space: nowrap; }
         .maw-about-table td code,
         .maw-about-table th code {

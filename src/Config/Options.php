@@ -195,15 +195,55 @@ final class Options
     }
 
     /**
-     * Returns the built-in default cache TTL values (all in seconds).
+     * Minimum accepted value for the YouTube maximum-pages-per-refresh setting.
      *
+     * @var int
+     */
+    public const MIN_YOUTUBE_MAX_PAGES = 1;
+
+    /**
+     * Maximum accepted value for the YouTube maximum-pages-per-refresh setting.
+     *
+     * @var int
+     */
+    public const MAX_YOUTUBE_MAX_PAGES = 100;
+
+    /**
+     * Minimum accepted value for the daily YouTube call limit.
+     *
+     * @var int
+     */
+    public const MIN_YOUTUBE_DAILY_CALL_LIMIT = 1;
+
+    /**
+     * Maximum accepted value for the daily YouTube call limit.
+     *
+     * @var int
+     */
+    public const MAX_YOUTUBE_DAILY_CALL_LIMIT = 10000;
+
+    /**
+     * Returns the built-in default cache and guard values.
+     *
+     * TTLs (all in seconds):
      * - media_cache_ttl                  — how long transient and cookie are valid.
      * - youtube_request_in_progress_ttl  — mutex window for parallel API calls.
      * - youtube_error_ttl                — back-off window after a failed call.
      * - youtube_backup_window_seconds    — window within which the backup JSON
      *                                      file is served instead of re-fetching.
      *
-     * @return array<string,int> Map of setting key to integer TTL in seconds.
+     * Guard limits (counts, not seconds):
+     * - youtube_max_pages_per_refresh    — hard ceiling on playlistItems pages
+     *                                      requested during a single refresh. At
+     *                                      50 items per page the default of 20
+     *                                      covers roughly 1,000 items.
+     * - youtube_daily_call_limit         — circuit breaker on total outbound
+     *                                      YouTube requests per quota day. The
+     *                                      default of 200 leaves ample headroom
+     *                                      for normal refreshes while capping a
+     *                                      runaway well below YouTube's quota.
+     *
+     * @return array<string,int> Map of setting key to integer value.
      */
     public static function getDefaultCacheExpirations(): array
     {
@@ -212,16 +252,20 @@ final class Options
             'youtube_request_in_progress_ttl' => 600,
             'youtube_error_ttl'               => 600,
             'youtube_backup_window_seconds'   => 7200,
+            'youtube_max_pages_per_refresh'   => 20,
+            'youtube_daily_call_limit'        => 200,
         ];
     }
 
     /**
-     * Retrieves stored cache TTL settings merged with the built-in defaults.
+     * Retrieves stored cache and guard settings merged with the built-in defaults.
      *
-     * Absent or non-positive values fall back to the corresponding default.
-     * Returns the defaults if the stored option is not an array.
+     * Absent or non-positive values fall back to the corresponding default, so
+     * installations saved before the guard settings existed receive the defaults
+     * at read time without an administrator having to resave anything. Returns
+     * the defaults if the stored option is not an array.
      *
-     * @return array<string,int> Validated map of setting key to integer TTL in seconds.
+     * @return array<string,int> Validated map of setting key to integer value.
      */
     public static function getCacheExpirations(): array
     {
@@ -231,36 +275,80 @@ final class Options
             return $defaults;
         }
 
-        return [
-            'media_cache_ttl'                 => max(1, isset($stored['media_cache_ttl']) ? absint($stored['media_cache_ttl']) : $defaults['media_cache_ttl']),
-            'youtube_request_in_progress_ttl' => max(1, isset($stored['youtube_request_in_progress_ttl']) ? absint($stored['youtube_request_in_progress_ttl']) : $defaults['youtube_request_in_progress_ttl']),
-            'youtube_error_ttl'               => max(1, isset($stored['youtube_error_ttl']) ? absint($stored['youtube_error_ttl']) : $defaults['youtube_error_ttl']),
-            'youtube_backup_window_seconds'   => max(1, isset($stored['youtube_backup_window_seconds']) ? absint($stored['youtube_backup_window_seconds']) : $defaults['youtube_backup_window_seconds']),
-        ];
+        return self::sanitizeCacheExpirations($stored, $defaults);
     }
 
     /**
-     * Validates and persists cache TTL settings.
+     * Validates and persists cache and guard settings.
      *
-     * Each value is run through absint() and clamped to a minimum of 1 to
-     * prevent zero or negative TTLs from being stored. Missing keys fall
-     * back to the built-in defaults.
+     * Each value is run through absint() and clamped to its allowed range to
+     * prevent zero, negative, or runaway values from being stored. Missing keys
+     * fall back to the built-in defaults.
      *
-     * @param array<string,mixed> $expirations Raw TTL values from the admin form.
+     * @param array<string,mixed> $expirations Raw values from the admin form.
      * @return void
      */
     public static function setCacheExpirations(array $expirations): void
     {
-        $defaults = self::getDefaultCacheExpirations();
+        update_option(
+            self::OPTION_CACHE_EXPIRATIONS,
+            self::sanitizeCacheExpirations($expirations, self::getDefaultCacheExpirations())
+        );
+    }
 
-        $sanitized = [
-            'media_cache_ttl'                 => max(1, isset($expirations['media_cache_ttl']) ? absint($expirations['media_cache_ttl']) : $defaults['media_cache_ttl']),
-            'youtube_request_in_progress_ttl' => max(1, isset($expirations['youtube_request_in_progress_ttl']) ? absint($expirations['youtube_request_in_progress_ttl']) : $defaults['youtube_request_in_progress_ttl']),
-            'youtube_error_ttl'               => max(1, isset($expirations['youtube_error_ttl']) ? absint($expirations['youtube_error_ttl']) : $defaults['youtube_error_ttl']),
-            'youtube_backup_window_seconds'   => max(1, isset($expirations['youtube_backup_window_seconds']) ? absint($expirations['youtube_backup_window_seconds']) : $defaults['youtube_backup_window_seconds']),
+    /**
+     * Normalizes a raw cache/guard settings array against the defaults.
+     *
+     * Shared by {@see self::getCacheExpirations()} and
+     * {@see self::setCacheExpirations()} so a value read back is always
+     * validated identically to a value being written.
+     *
+     * @param array<string,mixed> $source   Raw values (stored option or form input).
+     * @param array<string,int>   $defaults Built-in defaults to fall back to.
+     * @return array<string,int> Validated settings.
+     */
+    private static function sanitizeCacheExpirations(array $source, array $defaults): array
+    {
+        return [
+            'media_cache_ttl'                 => max(1, isset($source['media_cache_ttl']) ? absint($source['media_cache_ttl']) : $defaults['media_cache_ttl']),
+            'youtube_request_in_progress_ttl' => max(1, isset($source['youtube_request_in_progress_ttl']) ? absint($source['youtube_request_in_progress_ttl']) : $defaults['youtube_request_in_progress_ttl']),
+            'youtube_error_ttl'               => max(1, isset($source['youtube_error_ttl']) ? absint($source['youtube_error_ttl']) : $defaults['youtube_error_ttl']),
+            'youtube_backup_window_seconds'   => max(1, isset($source['youtube_backup_window_seconds']) ? absint($source['youtube_backup_window_seconds']) : $defaults['youtube_backup_window_seconds']),
+            'youtube_max_pages_per_refresh'   => self::clampSetting(
+                $source,
+                'youtube_max_pages_per_refresh',
+                $defaults['youtube_max_pages_per_refresh'],
+                self::MIN_YOUTUBE_MAX_PAGES,
+                self::MAX_YOUTUBE_MAX_PAGES
+            ),
+            'youtube_daily_call_limit'        => self::clampSetting(
+                $source,
+                'youtube_daily_call_limit',
+                $defaults['youtube_daily_call_limit'],
+                self::MIN_YOUTUBE_DAILY_CALL_LIMIT,
+                self::MAX_YOUTUBE_DAILY_CALL_LIMIT
+            ),
         ];
+    }
 
-        update_option(self::OPTION_CACHE_EXPIRATIONS, $sanitized);
+    /**
+     * Reads one integer setting from a raw array and clamps it to a range.
+     *
+     * A missing key falls back to $default; a present but empty or non-numeric
+     * value becomes 0 via absint() and is then raised to $min.
+     *
+     * @param array<string,mixed> $source  Raw values.
+     * @param string              $key     Key to read.
+     * @param int                 $default Value to use when the key is absent.
+     * @param int                 $min     Lowest allowed value.
+     * @param int                 $max     Highest allowed value.
+     * @return int Clamped integer value.
+     */
+    private static function clampSetting(array $source, string $key, int $default, int $min, int $max): int
+    {
+        $value = isset($source[$key]) ? absint($source[$key]) : $default;
+
+        return max($min, min($max, $value));
     }
 
     /**

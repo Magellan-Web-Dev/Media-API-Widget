@@ -26,11 +26,13 @@ A WordPress plugin that syncs YouTube playlists and podcast RSS feeds to the fro
 6. [Admin Shortcode Field References (Dynamic Values)](#admin-shortcode-field-references-dynamic-values)
 7. [Podcast Platform Support](#podcast-platform-support)
 8. [Caching Architecture](#caching-architecture)
-9. [SEO Meta Tags](#seo-meta-tags)
-10. [Podcast Player (`/podcast/player`)](#podcast-player-podcastplayer)
-11. [API Statistics](#api-statistics)
-12. [JavaScript Events](#javascript-events)
-13. [Backward Compatibility](#backward-compatibility)
+9. [Runaway Protection](#runaway-protection)
+10. [Tests](#tests)
+11. [SEO Meta Tags](#seo-meta-tags)
+12. [Podcast Player (`/podcast/player`)](#podcast-player-podcastplayer)
+13. [API Statistics](#api-statistics)
+14. [JavaScript Events](#javascript-events)
+15. [Backward Compatibility](#backward-compatibility)
 
 ---
 
@@ -126,11 +128,21 @@ Configure how long data is cached to control YouTube API quota usage. Navigate t
 | Setting | Default | Description |
 |---|---|---|
 | **Media cache transient** | 7200 s (2 hrs) | How long fetched YouTube or podcast data is held in WordPress transients. Also sets the client-side cookie duration. |
-| **YouTube request-in-progress transient** | 600 s (10 min) | Prevents duplicate simultaneous API requests. |
+| **YouTube request-in-progress transient** | 600 s (10 min) | Prevents duplicate simultaneous API requests. Also sets how long the atomic per-playlist refresh lock stays valid before an abandoned one can be reclaimed. |
 | **YouTube error transient** | 600 s (10 min) | After a failed YouTube API call, blocks retry for this duration. |
 | **YouTube backup window** | 7200 s (2 hrs) | If the last successful fetch was within this window, serves the local JSON backup instead of re-calling the API. |
+| **YouTube maximum pages per refresh** | 20 pages | Hard ceiling on `playlistItems` requests during a single refresh. Allowed range 1–100. |
+| **YouTube daily call limit** | 200 calls | Circuit breaker on total outbound YouTube requests per quota day. Allowed range 1–10,000. |
 
 > **Important:** The YouTube Data API allows 10,000 units per day. Each playlist fetch costs 1 unit per page of 50 results. Set the cache TTL high enough to avoid exhausting your quota.
+
+The Caching page also shows read-only guard status:
+
+- **YouTube calls used today** — count against the configured daily limit.
+- **Quota day / reset** — the current quota day and the timezone it resets in.
+- **Last guard event** — why a refresh was last abandoned, if one was.
+
+See [Runaway Protection](#runaway-protection) for what the two guards do.
 
 ---
 
@@ -509,6 +521,72 @@ The **client-side cookie** (`media_api_widget`) controls when the browser re-req
 
 ---
 
+## Runaway Protection
+
+YouTube playlists are fetched from `wp_head` on ordinary front-end page views, so anything that can loop — or that several PHP workers can enter at once — multiplies directly into billed API quota. Two independent guards bound the worst case, and neither changes the output of a healthy playlist.
+
+### Safe pagination
+
+Pagination follows YouTube's documented model: the first request carries no page token and counts as page 1, and each later request uses the `nextPageToken` from the previous response. Normal termination is the **absence** of a `nextPageToken`.
+
+`pageInfo.totalResults` is deliberately **not** used as the loop's exit condition. For `playlistItems` it counts entries the API will not return (deleted or private videos), so a loop that waits for the collected-item tally to reach it can never satisfy its own exit condition and ends up relying entirely on the token.
+
+Every page token used is remembered, a request is only ever issued for page 1 or for a nonempty previously-unseen token, and all URL parameters are encoded. The refresh is abandoned when any of these occurs:
+
+| Reason code | Meaning |
+|---|---|
+| `repeated_page_token` | A page token was offered twice, so pagination would have looped. |
+| `empty_page_with_next_token` | A page returned no items yet still supplied another token. |
+| `malformed_response` | The body was not valid JSON, or was missing `items` / `pageInfo`. |
+| `maximum_pages_reached` | The configured page ceiling was reached. |
+| `daily_limit_reached` | The daily call budget is spent; nothing was sent. |
+| `concurrent_refresh` | Another worker already held this playlist's refresh lock. |
+| `http_error` | A connection failure or a non-200 status on any page. |
+
+**Partial data is never promoted to good data.** The backup JSON file, the primary transient, the cleared error transient, and `maw_yt_last_fetched_{playlist_name}` are written only after *every* requested page completed normally. A refresh that aborts part-way leaves all previously stored data untouched and falls back to it, so a failure can never overwrite a complete playlist with a truncated one.
+
+Diagnostics record only a reason code, the playlist slug, a page count, and a timestamp — never the API key, the request URL, response bodies, or headers. One guard event is recorded per aborted refresh, and nothing is written to the PHP error log unless `WP_DEBUG` is enabled.
+
+### Daily circuit breaker
+
+Every attempted outbound YouTube `playlistItems` request is counted **before** it is sent, including requests that return errors, because a failed call can still consume quota. Once the limit is reached no request goes outbound at all and cached or backup data is served instead.
+
+- The counter is stored per quota day and incremented with a single atomic SQL statement, so parallel PHP workers cannot meaningfully bypass it.
+- It resets at **midnight `America/Los_Angeles`**, matching YouTube's own quota day, including across daylight-saving changes.
+- Podcast, Apple/iTunes, RSS, and GitHub-updater requests are **not** counted.
+- A request blocked before going outbound is not recorded as an API call.
+- Counter rows older than yesterday are pruned, so `wp_options` does not grow one row per day forever.
+
+### Concurrency
+
+Simultaneous cache misses for the same playlist no longer all begin fetching. A refresh first takes an atomic per-playlist lock: a `maw_yt_lock_{playlist_name}` row created by a bare `INSERT`, so the database's unique `option_name` constraint performs the arbitration. (`add_option()` is not suitable here — WordPress implements it as an `INSERT ... ON DUPLICATE KEY UPDATE` behind a cached read, so two concurrent callers can both believe they created the row.)
+
+The lock value carries an owner token and an expiry. Only the owner can release it, the release runs on every exit path — success, error, malformed response, page-limit abort, and thrown exception — and a lock left behind by a worker that died mid-refresh is reclaimed once it expires, so a stale lock can never block refreshes permanently. The legacy `{playlist_name}_youtube_request_in_progress` transient is still written and cleared exactly as before for the admin status UI and backward compatibility, but it is no longer what provides mutual exclusion.
+
+---
+
+## Tests
+
+The plugin has no Composer dependencies, and neither does its test suite. It runs on plain PHP with a small set of WordPress doubles in `tests/bootstrap.php`:
+
+```
+php tests/run-tests.php            # run everything
+php tests/run-tests.php pagination # run one group
+```
+
+The runner exits non-zero if any assertion fails. Groups live in `tests/cases/`:
+
+| Group | Covers |
+|---|---|
+| `pagination` | One-page and eight-page/400-item playlists, termination on an absent token, repeated tokens, empty pages with a token, malformed JSON, missing `items`/`pageInfo`, HTTP and transport errors, the page ceiling, URL encoding, sorting/trimming, and that no API key reaches diagnostics. |
+| `daily-limit` | Reservation before sending, enforcement mid-pagination, blocked requests not being logged, the midnight `America/Los_Angeles` rollover in both standard and daylight time, and counter cleanup. |
+| `locking` | Two callers contending for one playlist, independent playlists, owner-only release, stale-lock recovery, corrupted lock values, and lock release on every exit path. |
+| `cache-integrity` | That a partial or failed refresh leaves the backup file, the transient, and the last-fetched timestamp untouched, and that the existing back-off and backup-window short-circuits still work. |
+| `options` | The new defaults, and that installs saved before the guard settings existed receive them at read time without the stored option being rewritten. |
+| `podcast` | That podcast, Apple/iTunes, and embed paths consume no YouTube budget, take no YouTube lock, and still work when the YouTube budget is exhausted. |
+
+---
+
 ## SEO Meta Tags
 
 When a page contains a `[media-api-widget-render]` or `[media-api-podcast-player]` shortcode, the plugin automatically injects Open Graph and Twitter Card meta tags into `<head>` based on the selected media item.
@@ -626,3 +704,4 @@ document.addEventListener("mediaApiWidgetItemClick", (e) => {
 - The plugin merges any `MEDIA_CONTENT_DATA` constant (defined by WPCode or a theme) with admin-configured media items, so legacy setups continue to work without changes.
 - The `[media-api-widget-item]` shortcode tag is an alias for `[media-api-widget-render]`.
 - The `mutiplegridtext` attribute (legacy typo) is automatically aliased to `multiplegridtext`.
+- The two guard settings added in 4.8.0 are read from the existing `maw_cache_expirations` option. Installs that predate them receive the defaults at read time — no resave is required, no existing option name or value changes, and reading the settings does not rewrite what is stored.

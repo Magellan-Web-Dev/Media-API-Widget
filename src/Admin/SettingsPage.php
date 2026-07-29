@@ -408,9 +408,11 @@ final class SettingsPage
      *
      * For each media item, deletes:
      * - The primary data transient (`{type}_{playlist_name}`).
-     * - YouTube-specific transients: error flag and request-in-progress lock.
+     * - YouTube-specific transients: error flag and request-in-progress flag.
      * - The `maw_yt_last_fetched_{playlist_name}` wp_options entry that guards
      *   the backup-window rate limit.
+     * - The `maw_yt_lock_{playlist_name}` atomic refresh lock, so a lock left
+     *   behind by an abandoned request cannot delay the next refresh.
      *
      * After clearing transients and options, expires each cookie by setting it
      * with a timestamp in the past, and also removes it from `$_COOKIE` so the
@@ -442,6 +444,7 @@ final class SettingsPage
                 $keys[] = $playlistName . '_youtube_error';
                 $keys[] = $playlistName . '_youtube_request_in_progress';
                 $optionKeys[] = 'maw_yt_last_fetched_' . $playlistName;
+                $optionKeys[] = \MediaApiWidget\Support\YoutubeGuard::lockOptionName($playlistName);
             }
         }
 

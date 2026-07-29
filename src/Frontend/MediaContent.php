@@ -3,6 +3,7 @@ namespace MediaApiWidget\Frontend;
 
 use MediaApiWidget\Config\Options;
 use MediaApiWidget\Support\SafeRemoteRequest;
+use MediaApiWidget\Support\YoutubeGuard;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -344,6 +345,8 @@ final class MediaContent
             'youtube_request_in_progress_ttl' => $cacheExpirations['youtube_request_in_progress_ttl'],
             'youtube_error_ttl' => $cacheExpirations['youtube_error_ttl'],
             'youtube_backup_window_seconds' => $cacheExpirations['youtube_backup_window_seconds'],
+            'youtube_max_pages_per_refresh' => $cacheExpirations['youtube_max_pages_per_refresh'],
+            'youtube_daily_call_limit' => $cacheExpirations['youtube_daily_call_limit'],
         ];
     }
 
@@ -394,12 +397,23 @@ final class MediaContent
      * calling the API. Also bails early if a previous error transient or
      * in-progress transient is set.
      *
-     * Paginates through all results (50 items per page) using nextPageToken.
-     * Parses title, video ID, thumbnail, episode number (when sort_mode is
-     * 'number_in_title'), publishedDate, and description for each item. Deduplicates
-     * by title and optionally trims to the first six items unless load_full_playlist
-     * is set. Writes results to the backup JSON file, the transient cache, and a
-     * wp_options timestamp record. Clears error and in-progress transients on success.
+     * Concurrency is enforced by {@see \MediaApiWidget\Support\YoutubeGuard::acquireLock()},
+     * an atomic per-playlist lock that is always released in a finally block.
+     * The legacy `{playlist_name}_youtube_request_in_progress` transient is
+     * still written and cleared exactly as before, for the admin status UI and
+     * back-compat, but it is no longer what provides mutual exclusion.
+     *
+     * Pagination is delegated to {@see self::fetchYoutubePlaylistItems()}, which
+     * is bounded by `youtube_max_pages_per_refresh` and by the daily circuit
+     * breaker. Parsing is delegated to {@see self::parseYoutubeItems()}, which
+     * handles title, video ID, thumbnail, episode number (when sort_mode is
+     * 'number_in_title'), publishedDate, and description, deduplicates by title,
+     * and trims to the first six items unless load_full_playlist is set.
+     *
+     * The backup JSON file, the transient cache, the cleared error transient and
+     * the `maw_yt_last_fetched_{playlist_name}` timestamp are written only after
+     * every requested page completed normally. A refresh that aborts part-way
+     * leaves all previously stored data intact and falls back to it.
      *
      * @param array<string,mixed> $config Resolved media config array.
      * @param array<string,mixed> &$state Mutable state. Sets 'parsedData', 'errorLoadingData', or 'abort'.
@@ -424,6 +438,8 @@ final class MediaContent
         $mediaCacheTtl                 = (int) $config['media_cache_ttl'];
         $youtubeRequestInProgressTtl   = (int) $config['youtube_request_in_progress_ttl'];
         $youtubeBackupWindowSeconds    = (int) $config['youtube_backup_window_seconds'];
+        $youtubeMaxPagesPerRefresh     = (int) $config['youtube_max_pages_per_refresh'];
+        $youtubeDailyCallLimit         = (int) $config['youtube_daily_call_limit'];
 
         $previousYoutubeError  = get_transient($playlistName . '_youtube_error');
         $lastFetchedOptionKey  = 'maw_yt_last_fetched_' . sanitize_key((string) $playlistName);
@@ -453,47 +469,257 @@ final class MediaContent
             return;
         }
 
-        $youtubeReqUrl = 'https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=' . $mediaData . '&key=' . $apiKey . '&maxResults=50';
-        set_transient($playlistName . '_youtube_request_in_progress', true, $youtubeRequestInProgressTtl);
+        // Acquire the atomic per-playlist refresh lock before anything goes
+        // outbound. A null handle means another worker is already refreshing
+        // this playlist, so this request serves cached/backup data instead of
+        // duplicating the fetch.
+        $lock = YoutubeGuard::acquireLock($playlistName, $youtubeRequestInProgressTtl);
 
-        $youtubeGetReq = self::trackedRemoteGet($youtubeReqUrl, [
-            'playlist_name' => $playlistName,
-            'type' => $type,
-            'endpoint' => 'youtube_playlist_items',
-        ]);
-
-        if (is_wp_error($youtubeGetReq) || wp_remote_retrieve_response_code($youtubeGetReq) !== 200) {
+        if ($lock === null) {
+            YoutubeGuard::recordGuardEvent('concurrent_refresh', $playlistName);
             $state['errorLoadingData'] = true;
             return;
         }
 
-        $youtubeData        = json_decode(wp_remote_retrieve_body($youtubeGetReq), true);
-        $youtubeItems       = $youtubeData['items'];
-        $youtubeItemsTally  = count($youtubeData['items']);
-        $nextPageToken      = $youtubeData['nextPageToken'] ?? null;
+        set_transient($playlistName . '_youtube_request_in_progress', true, $youtubeRequestInProgressTtl);
 
-        // Youtube Has A Limit Of 50 Results Per Request. If Playlist Item Total Is Greater Than 50, Then A While Loop Runs Until Total Items Received Equals Total Results
-        while ($youtubeData['pageInfo']['totalResults'] > $youtubeItemsTally) {
-            $youtubeLoop = self::trackedRemoteGet($youtubeReqUrl . '&pageToken=' . $nextPageToken, [
+        try {
+            $fetch = self::fetchYoutubePlaylistItems(
+                (string) $mediaData,
+                (string) $apiKey,
+                (string) $playlistName,
+                (string) $type,
+                $youtubeMaxPagesPerRefresh,
+                $youtubeDailyCallLimit
+            );
+
+            // Pagination aborted: record one sanitized guard event and bail out
+            // without touching the backup file, the transient, or the
+            // last-fetched timestamp, so previously good data survives intact.
+            if (!$fetch['ok']) {
+                YoutubeGuard::recordGuardEvent($fetch['reason'], $playlistName, $fetch['pages']);
+                $state['errorLoadingData'] = true;
+                return;
+            }
+
+            $parsedItems = self::parseYoutubeItems(
+                $fetch['items'],
+                $sortMode,
+                $useSeasonEpisode,
+                $seasonEpisodeRegex,
+                $loadFullPlaylist
+            );
+
+            // A structurally invalid item aborts the whole render, exactly as
+            // the previous implementation did.
+            if ($parsedItems === null) {
+                $state['abort'] = true;
+                return;
+            }
+
+            $state['parsedData'] = $parsedItems;
+
+            // Every requested page completed normally, so this refresh may now
+            // replace the stored data.
+            $backupData = json_encode([
+                'time_stored' => time(),
+                'data' => $state['parsedData'],
+            ]);
+
+            $youtubeBackupFilePath = self::backupDir() . $playlistName . '_youtube_backup_data.json';
+            file_put_contents($youtubeBackupFilePath, $backupData);
+
+            // Set parsed data to Wordpress transient server cache
+            set_transient($type . '_' . $playlistName, $state['parsedData'], $mediaCacheTtl);
+
+            // Clear Youtube API Error Transient If Data Successfully Retrieved
+            delete_transient($playlistName . '_youtube_error');
+
+            // Clear Youtube API Request In Progress Transient If Data Successfully Retrieved
+            delete_transient($playlistName . '_youtube_request_in_progress');
+
+            // Persist successful fetch timestamp so rate limiting does not rely on transient durability.
+            update_option($lastFetchedOptionKey, time(), false);
+        } finally {
+            // Released on every path — success, error, malformed response,
+            // page-limit abort, and thrown exception — so a stale lock can
+            // never wedge future refreshes.
+            YoutubeGuard::releaseLock($lock);
+        }
+    }
+
+    /**
+     * Requests every page of a YouTube playlist, with hard bounds on the loop.
+     *
+     * Pagination follows YouTube's documented model: the first request carries
+     * no page token and counts as page 1, and each subsequent request uses the
+     * `nextPageToken` from the previous response. Termination under normal
+     * conditions is the absence of a `nextPageToken`.
+     *
+     * `pageInfo.totalResults` is deliberately *not* used to decide when to stop.
+     * For playlistItems it counts entries YouTube will not return (deleted or
+     * private videos), so a loop driven by it can never satisfy its own exit
+     * condition and depends entirely on the token — which is what allowed a
+     * single refresh to issue thousands of requests. It is still read, and
+     * returned for diagnostics only.
+     *
+     * The loop aborts, discarding everything collected so far, when:
+     * - the page ceiling would be exceeded (`maximum_pages_reached`);
+     * - the daily circuit breaker is out of budget (`daily_limit_reached`);
+     * - a page token repeats (`repeated_page_token`);
+     * - a page returns no items yet supplies another token (`empty_page_with_next_token`);
+     * - a WP_Error or non-200 status occurs on any page (`http_error`);
+     * - a body is not valid JSON or lacks `items`/`pageInfo` (`malformed_response`).
+     *
+     * A request is only ever issued for page 1 or for a nonempty, previously
+     * unseen token, and every URL parameter is rawurlencode()d.
+     *
+     * @param string $playlistId   The YouTube playlist ID.
+     * @param string $apiKey       The YouTube Data API key.
+     * @param string $playlistName Playlist slug, for API logging and diagnostics.
+     * @param string $type         Media type, for API logging ('youtube').
+     * @param int    $maxPages     Hard ceiling on pages requested this refresh.
+     * @param int    $dailyLimit   Daily outbound YouTube request budget.
+     * @return array{ok:bool,items:array<int,mixed>,pages:int,reason:string,total_results:int|null}
+     */
+    private static function fetchYoutubePlaylistItems(
+        string $playlistId,
+        string $apiKey,
+        string $playlistName,
+        string $type,
+        int $maxPages,
+        int $dailyLimit
+    ): array {
+        $baseUrl = 'https://youtube.googleapis.com/youtube/v3/playlistItems'
+            . '?part=snippet'
+            . '&playlistId=' . rawurlencode($playlistId)
+            . '&key=' . rawurlencode($apiKey)
+            . '&maxResults=50';
+
+        $items        = [];
+        $seenTokens   = [];
+        $pageToken    = null;
+        $pages        = 0;
+        $totalResults = null;
+
+        $fail = static function (string $reason) use (&$items, &$pages, &$totalResults): array {
+            return [
+                'ok'            => false,
+                'items'         => [],
+                'pages'         => $pages,
+                'reason'        => $reason,
+                'total_results' => $totalResults,
+            ];
+        };
+
+        while (true) {
+            // Hard page ceiling. Checked before the request, so the configured
+            // maximum is the number of requests actually issued.
+            if ($pages >= max(1, $maxPages)) {
+                return $fail('maximum_pages_reached');
+            }
+
+            $url = $baseUrl;
+
+            if ($pages > 0) {
+                // Never request a page without a nonempty, previously unseen token.
+                if (!is_string($pageToken) || $pageToken === '') {
+                    return $fail('malformed_response');
+                }
+                if (isset($seenTokens[$pageToken])) {
+                    return $fail('repeated_page_token');
+                }
+                $seenTokens[$pageToken] = true;
+                $url .= '&pageToken=' . rawurlencode($pageToken);
+            }
+
+            // Reserve quota before the request leaves the server. A blocked
+            // request never goes outbound and is never logged as an API call.
+            if (!YoutubeGuard::reserveDailyCall($dailyLimit)) {
+                return $fail('daily_limit_reached');
+            }
+
+            $response = self::trackedRemoteGet($url, [
                 'playlist_name' => $playlistName,
                 'type' => $type,
                 'endpoint' => 'youtube_playlist_items',
             ]);
-            if (is_wp_error($youtubeLoop) || wp_remote_retrieve_response_code($youtubeLoop) !== 200) {
-                $state['errorLoadingData'] = true;
-                break;
-            }
-            $youtubeLoop        = json_decode(wp_remote_retrieve_body($youtubeLoop), true);
-            $youtubeItemsTally += count($youtubeLoop['items']);
-            $youtubeItems       = array_merge($youtubeItems, $youtubeLoop['items']);
-            $nextPageToken      = $youtubeLoop['nextPageToken'] ?? null;
-            if (!$nextPageToken) {
-                break;
-            }
-        }
 
-        // Combine All Youtube Video Items Together From While Loop If Looped Through
-        $youtubeData['items'] = $youtubeItems;
+            $pages++;
+
+            if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+                return $fail('http_error');
+            }
+
+            $data = json_decode(wp_remote_retrieve_body($response), true);
+
+            if (
+                !is_array($data)
+                || !isset($data['items']) || !is_array($data['items'])
+                || !isset($data['pageInfo']) || !is_array($data['pageInfo'])
+            ) {
+                return $fail('malformed_response');
+            }
+
+            if (isset($data['pageInfo']['totalResults'])) {
+                $totalResults = (int) $data['pageInfo']['totalResults'];
+            }
+
+            $nextPageToken = isset($data['nextPageToken']) && is_string($data['nextPageToken'])
+                ? $data['nextPageToken']
+                : '';
+
+            // A page that yields nothing but promises more is the exact shape
+            // that let the old loop spin forever.
+            if ($data['items'] === [] && $nextPageToken !== '') {
+                return $fail('empty_page_with_next_token');
+            }
+
+            $items = array_merge($items, $data['items']);
+
+            // Normal termination: YouTube has no further page to offer.
+            if ($nextPageToken === '') {
+                return [
+                    'ok'            => true,
+                    'items'         => $items,
+                    'pages'         => $pages,
+                    'reason'        => '',
+                    'total_results' => $totalResults,
+                ];
+            }
+
+            $pageToken = $nextPageToken;
+        }
+    }
+
+    /**
+     * Parses raw playlistItems entries into the plugin's media item structure.
+     *
+     * Extracted verbatim from the previous inline implementation so a healthy
+     * playlist produces byte-identical output: the same episode/season parsing,
+     * the same thumbnail preference order, the same de-duplication by episode
+     * key and then by adjacent title, the same sort, and the same six-item trim
+     * when load_full_playlist is not set.
+     *
+     * @param array<int,mixed> $rawItems           Merged `items` arrays from every page.
+     * @param string           $sortMode           'normal' or 'number_in_title'.
+     * @param bool             $useSeasonEpisode   True when season/episode regex mode is active.
+     * @param string           $seasonEpisodeRegex The user-supplied pattern, without delimiters.
+     * @param mixed            $loadFullPlaylist   Anything other than boolean true trims
+     *                                             the result to six items. Left untyped so a
+     *                                             legacy MEDIA_CONTENT_DATA value of 1 or '1'
+     *                                             keeps behaving exactly as it did before.
+     * @return array<int,array<string,mixed>>|null Parsed items, or null when an item
+     *                                             lacked a snippet and the render must abort.
+     */
+    private static function parseYoutubeItems(
+        array $rawItems,
+        string $sortMode,
+        bool $useSeasonEpisode,
+        string $seasonEpisodeRegex,
+        $loadFullPlaylist
+    ): ?array {
+        $parsedData = [];
 
         // Used to check if an episode (or season/episode pair) was already
         // retrieved, so duplicate uploads of the same numbered episode are
@@ -502,7 +728,7 @@ final class MediaContent
         $youtubeEpisodeNumberCollected = [];
 
         // Loop Through Video Items And Parse Accordingly
-        foreach ($youtubeData['items'] as $item) {
+        foreach ($rawItems as $item) {
             $itemOutput = [];
             if ($item) {
                 if ($item['snippet']) {
@@ -564,15 +790,14 @@ final class MediaContent
                         $itemOutput['description'] = null;
                     }
                 } else {
-                    $state['abort'] = true;
-                    return;
+                    return null;
                 }
             } else {
                 $itemOutput['id'] = null;
             }
 
             if ($itemOutput['thumbnail'] !== null) {
-                array_push($state['parsedData'], $itemOutput);
+                array_push($parsedData, $itemOutput);
             }
         }
 
@@ -580,16 +805,16 @@ final class MediaContent
         // In season/episode regex mode, sort by season first (descending), then
         // episode (descending), so newer seasons lead and episodes order within them.
         if ($useSeasonEpisode) {
-            $seasonValues  = array_column($state['parsedData'], 'season');
-            $episodeValues = array_column($state['parsedData'], 'episode');
-            array_multisort($seasonValues, SORT_DESC, $episodeValues, SORT_DESC, $state['parsedData']);
+            $seasonValues  = array_column($parsedData, 'season');
+            $episodeValues = array_column($parsedData, 'episode');
+            array_multisort($seasonValues, SORT_DESC, $episodeValues, SORT_DESC, $parsedData);
         } else if ($sortMode === 'number_in_title') {
-            $keyValues = array_column($state['parsedData'], 'episode');
-            array_multisort($keyValues, SORT_DESC, $state['parsedData']);
+            $keyValues = array_column($parsedData, 'episode');
+            array_multisort($keyValues, SORT_DESC, $parsedData);
         }
 
         // Checks to make sure there aren't any Items with the same title. If so, it is removed
-        $preDuplicateRemoval = $state['parsedData'];
+        $preDuplicateRemoval = $parsedData;
 
         foreach ($preDuplicateRemoval as $index => $video) {
             if (isset($video['title']) && isset($preDuplicateRemoval[$index + 1]['title']) && $index + 1 < count($preDuplicateRemoval)) {
@@ -609,28 +834,7 @@ final class MediaContent
                 }
             }
         }
-        $state['parsedData'] = array_values($youtubeListOutput);
-
-        // Check backup youtube stored data to see if it is older than 6 hours. If so, update youtube data backup file
-        $backupData = json_encode([
-            'time_stored' => time(),
-            'data' => $state['parsedData'],
-        ]);
-
-        $youtubeBackupFilePath = self::backupDir() . $playlistName . '_youtube_backup_data.json';
-        file_put_contents($youtubeBackupFilePath, $backupData);
-
-        // Set parsed data to Wordpress transient server cache
-        set_transient($type . '_' . $playlistName, $state['parsedData'], $mediaCacheTtl);
-
-        // Clear Youtube API Error Transient If Data Successfully Retrieved
-        delete_transient($playlistName . '_youtube_error');
-
-        // Clear Youtube API Request In Progress Transient If Data Successfully Retrieved
-        delete_transient($playlistName . '_youtube_request_in_progress');
-
-        // Persist successful fetch timestamp so rate limiting does not rely on transient durability.
-        update_option($lastFetchedOptionKey, time(), false);
+        return array_values($youtubeListOutput);
     }
 
     /**
