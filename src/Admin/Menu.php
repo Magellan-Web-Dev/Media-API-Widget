@@ -61,6 +61,7 @@ final class Menu
      * - admin_menu              → {@see self::addMenu()} builds the menu structure.
      * - admin_enqueue_scripts   → {@see self::enqueueAssets()} loads CSS/JS on plugin pages.
      * - admin_init (×2)         → form POST handlers for Settings and Caching pages.
+     * - admin_post_{action}     → backup JSON download endpoint for the Stats page.
      *
      * @return void
      */
@@ -70,6 +71,7 @@ final class Menu
         add_action('admin_enqueue_scripts', [$this, 'enqueueAssets']);
         add_action('admin_init', [$this->settingsPage, 'handlePost']);
         add_action('admin_init', [$this->cachingPage, 'handlePost']);
+        add_action('admin_post_' . StatsPage::DOWNLOAD_ACTION, [$this->statsPage, 'handleDownload']);
     }
 
     /**

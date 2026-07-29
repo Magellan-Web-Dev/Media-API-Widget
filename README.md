@@ -45,7 +45,7 @@ Media API Widget provides a structured system for embedding YouTube playlists an
 - **Custom Podcast Player** — A self-hosted, fully themed podcast player served at `/podcast/player` and embeddable via iframe.
 - **Global Shortcode Fields** — Store key/value pairs in the admin and reference them in any shortcode attribute using `{{field_name}}` syntax.
 - **SEO** — Automatically injects Open Graph and Twitter Card meta tags derived from the media content on each page.
-- **API Stats** — Tracks every external API call in a database table with 24-hour reporting.
+- **API Stats** — Tracks every external API call in a database table with 24-hour reporting, including when each playlist's fallback backup was last stored and a direct download link for it.
 
 ---
 
@@ -149,6 +149,17 @@ See [Runaway Protection](#runaway-protection) for what the two guards do.
 ### API Stats
 
 Navigate to **Media API → API Stats** to see a summary of all external API calls made in the last 24 hours, broken down by playlist, media type, endpoint, and hour.
+
+The **By Playlist and Endpoint** table also reports on the local backup each playlist falls back to when a live API call fails:
+
+| Column | Shows |
+|---|---|
+| **Last Successful Backup** | When the playlist's backup JSON was last stored successfully, in the site timezone. Reads the `time_stored` value written inside the file, falling back to the file's modification time for older files. Shows *No backup stored* when no file exists yet. |
+| **Backup File** | A **Download** link that streams the backup JSON file directly, with its size beside it. Shows an em dash when there is no file to download. |
+
+Because a backup is only written after a refresh completes every requested page, the timestamp is the last *successful* store rather than the last attempt — a failed or partial refresh leaves the previous good backup, and its timestamp, untouched. YouTube playlists always have a backup once one refresh has succeeded; podcast backups exist for direct RSS feeds, while Apple-lookup and embed platforms have no backup file.
+
+Downloads are served through `admin-post.php` rather than a direct uploads URL, so every request is checked for the `manage_options` capability and a valid nonce, and the file path is resolved and confirmed to be inside the backup directory before anything is sent. The files are only ever read — nothing on the page can write, replace, or delete a backup.
 
 Logs are automatically pruned after 48 hours.
 
@@ -519,6 +530,8 @@ Make YouTube API call / fetch RSS feed
 
 The **client-side cookie** (`media_api_widget`) controls when the browser re-requests fresh data. When the cookie is absent or expired, the server pushes the latest cached data into `localStorage`. The front-end JavaScript reads `localStorage` on every page load.
 
+The state of the middle layer is visible in the admin: the **By Playlist and Endpoint** table on [API Stats](#api-stats) shows when each playlist's backup JSON was last stored successfully and offers it for download.
+
 ---
 
 ## Runaway Protection
@@ -584,6 +597,7 @@ The runner exits non-zero if any assertion fails. Groups live in `tests/cases/`:
 | `cache-integrity` | That a partial or failed refresh leaves the backup file, the transient, and the last-fetched timestamp untouched, and that the existing back-off and backup-window short-circuits still work. |
 | `options` | The new defaults, and that installs saved before the guard settings existed receive them at read time without the stored option being rewritten. |
 | `podcast` | That podcast, Apple/iTunes, and embed paths consume no YouTube budget, take no YouTube lock, and still work when the YouTube budget is exhausted. |
+| `backup-inventory` | That the API Stats backup columns resolve the same file the media pipeline writes, report `time_stored` (falling back to the file time), keep YouTube and podcast backups separate, and report nothing for a missing file, an unsupported media type, or an empty slug. |
 
 ---
 
@@ -643,6 +657,15 @@ Every call to an external API (YouTube, iTunes lookup, podcast RSS) is logged to
 - Timestamp (GMT)
 
 Logs older than **48 hours** are pruned automatically (checked at most once per hour). The **API Stats** admin page shows totals, per-playlist breakdowns, and hourly detail for the **last 24 hours**.
+
+### Backup visibility
+
+Each row of the per-playlist breakdown also reports the backup that row's playlist would fall back to on failure:
+
+- **Last Successful Backup** — the `time_stored` timestamp inside `{playlist_name}_{media_type}_backup_data.json`, rendered in the site timezone. Only the first few hundred bytes of the file are read to retrieve it, so a large playlist is never decoded just to render the column. Files predating the `time_stored` key fall back to the file modification time.
+- **Backup File** — a nonced `admin-post.php?action=maw_download_backup` download link, capability-checked on `manage_options`, that streams the JSON file as an attachment.
+
+Both columns are read-only. Backup files are still written solely by the media pipeline, on the same successful-refresh-only rule described in [Runaway Protection](#runaway-protection).
 
 ---
 
@@ -705,3 +728,4 @@ document.addEventListener("mediaApiWidgetItemClick", (e) => {
 - The `[media-api-widget-item]` shortcode tag is an alias for `[media-api-widget-render]`.
 - The `mutiplegridtext` attribute (legacy typo) is automatically aliased to `multiplegridtext`.
 - The two guard settings added in 4.8.0 are read from the existing `maw_cache_expirations` option. Installs that predate them receive the defaults at read time — no resave is required, no existing option name or value changes, and reading the settings does not rewrite what is stored.
+- The backup columns added to the API Stats page in 4.9.0 are purely read-only reporting over the backup files the plugin already wrote. No file name, location, or write rule changed, no new option or database column was introduced, and installs with backups predating the `time_stored` key still report a timestamp via the file modification time.

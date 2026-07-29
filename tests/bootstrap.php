@@ -83,6 +83,10 @@ function maw_test_reset(): void
             }
         }
     }
+
+    // The backup inventory memoizes file metadata for the life of a request;
+    // clear it so a file deleted above is not reported as still present.
+    MediaApiWidget\Stats\BackupInventory::flushCache();
 }
 
 /**

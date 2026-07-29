@@ -66,7 +66,7 @@ final class AboutPage
                         <tr><td><strong>Global Shortcode Fields</strong></td><td>Store key/value pairs in the admin and reference them dynamically in any shortcode attribute using <code>&#123;&#123;field_name&#125;&#125;</code> syntax.</td></tr>
                         <tr><td><strong>SEO Meta Tags</strong></td><td>Automatically generates Open Graph and Twitter Card tags based on the media content found on each page.</td></tr>
                         <tr><td><strong>Layered Cache</strong></td><td>Combines WordPress transients, local backup JSON files, and browser localStorage to minimize API calls and handle outages gracefully.</td></tr>
-                        <tr><td><strong>API Stats</strong></td><td>Every external API call is logged to the database with 24-hour reporting in the admin.</td></tr>
+                        <tr><td><strong>API Stats</strong></td><td>Every external API call is logged to the database with 24-hour reporting in the admin, including when each playlist's fallback backup was last stored and a link to download it.</td></tr>
                     </tbody>
                 </table>
             </section>
@@ -586,6 +586,21 @@ document.addEventListener("mediaApiWidgetItemClick", (e) =&gt; {
 
                 <div class="maw-callout">
                     <strong>YouTube API Quota:</strong> The YouTube Data API allows 10,000 units/day. Each page of 50 playlist items costs 1 unit. A high cache TTL means fewer quota calls. You can clear the cache manually from the <a href="<?php echo esc_url(menu_page_url(Menu::SLUG, false)); ?>">Settings page</a> using the <em>Clear plugin cache</em> button.
+                </div>
+
+                <h3>Backup Files &amp; Downloads</h3>
+                <p>Each backup is a single JSON file named <code>{playlist_name}_{media_type}_backup_data.json</code> holding the stored playlist plus the timestamp it was written. The <strong>By Playlist and Endpoint</strong> table on the <a href="<?php echo esc_url(menu_page_url(Menu::STATS_SLUG, false)); ?>">API Stats page</a> reports on that file for every playlist it logged a call for:</p>
+                <table class="widefat striped maw-table maw-about-table">
+                    <thead><tr><th>Column</th><th>Shows</th></tr></thead>
+                    <tbody>
+                        <tr><td>Last Successful Backup</td><td>When the backup was last stored successfully, in your site timezone. Reads the timestamp inside the file, falling back to the file's modification time for backups written before that timestamp was recorded. Reads <em>No backup stored</em> when no file exists yet.</td></tr>
+                        <tr><td>Backup File</td><td>A <strong>Download</strong> link that streams the JSON file straight to your browser, with its size beside it. Shows an em dash when there is nothing to download.</td></tr>
+                    </tbody>
+                </table>
+                <p>A backup is written only after a refresh completes every requested page, so the timestamp is the last <em>successful</em> store &mdash; not the last attempt. If a refresh fails part-way, the previous good backup and its timestamp are left exactly as they were, which is why an old timestamp next to a row full of errors is the expected, healthy result. A YouTube playlist has a backup once any refresh has succeeded; podcasts using a direct RSS feed have one, while Apple-lookup and embed platforms have no backup file.</p>
+
+                <div class="maw-callout">
+                    <strong>Downloads are gated, and read-only:</strong> the link goes through <code>admin-post.php</code> rather than a public uploads URL, so every request is checked for the <code>manage_options</code> capability and a valid nonce, and the path is resolved and confirmed to sit inside the backups directory before any bytes are sent. Nothing on the Stats page can write, replace, or delete a backup file.
                 </div>
 
                 <h3>Runaway Protection</h3>
