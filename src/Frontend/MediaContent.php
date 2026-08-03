@@ -563,11 +563,18 @@ final class MediaContent
      * single refresh to issue thousands of requests. It is still read, and
      * returned for diagnostics only.
      *
+     * That gap also produces a second documented shape: a playlist reporting 67
+     * totalResults returned 50 items, then 11, then a page with an empty `items`
+     * array whose `nextPageToken` was the very token used to request it. An
+     * empty page reached after items have been collected is therefore treated as
+     * the successful end of pagination, and its token is never followed.
+     *
      * The loop aborts, discarding everything collected so far, when:
      * - the page ceiling would be exceeded (`maximum_pages_reached`);
      * - the daily circuit breaker is out of budget (`daily_limit_reached`);
-     * - a page token repeats (`repeated_page_token`);
-     * - a page returns no items yet supplies another token (`empty_page_with_next_token`);
+     * - a page token repeats on a nonempty page (`repeated_page_token`);
+     * - the very first page returns no items yet supplies another
+     *   token (`empty_page_with_next_token`);
      * - a WP_Error or non-200 status occurs on any page (`http_error`);
      * - a body is not valid JSON or lacks `items`/`pageInfo` (`malformed_response`).
      *
@@ -669,8 +676,22 @@ final class MediaContent
                 ? $data['nextPageToken']
                 : '';
 
-            // A page that yields nothing but promises more is the exact shape
-            // that let the old loop spin forever.
+            // An empty page arriving after items have already been collected is
+            // how YouTube signals the end of a playlist whose totalResults
+            // counts entries it will not return. The tail page's nextPageToken
+            // is the token that fetched it, so honouring it would loop.
+            if ($data['items'] === [] && $items !== []) {
+                return [
+                    'ok'            => true,
+                    'items'         => $items,
+                    'pages'         => $pages,
+                    'reason'        => '',
+                    'total_results' => $totalResults,
+                ];
+            }
+
+            // Nothing collected yet, but the response promises more: still the
+            // exact shape that let the old loop spin forever.
             if ($data['items'] === [] && $nextPageToken !== '') {
                 return $fail('empty_page_with_next_token');
             }

@@ -607,12 +607,13 @@ document.addEventListener("mediaApiWidgetItemClick", (e) =&gt; {
                 <p>Two independent guards bound how many YouTube requests a single refresh, and a single day, can produce. Both are configured on the <a href="<?php echo esc_url(menu_page_url(Menu::CACHING_SLUG, false)); ?>">Caching page</a>, which also shows read-only status: calls used today, the quota reset date and timezone, and the most recent guard event.</p>
 
                 <h4>Safe pagination</h4>
-                <p>Pagination is driven by YouTube's <code>nextPageToken</code>, never by <code>pageInfo.totalResults</code> &mdash; for <code>playlistItems</code> that total counts deleted and private videos the API will not return, so a loop that waits for the item tally to reach it may never finish. The first request counts as page 1, every token used is remembered, and the refresh is abandoned when any of the following happens:</p>
+                <p>Pagination is driven by YouTube's <code>nextPageToken</code>, never by <code>pageInfo.totalResults</code> &mdash; for <code>playlistItems</code> that total counts deleted and private videos the API will not return, so a loop that waits for the item tally to reach it may never finish. The first request counts as page 1, and every token used is remembered.</p>
+                <p>That same gap means a playlist can end on a page with no items at all: one reporting 67 total entries returned 50 items, then 11, then an empty page whose <code>nextPageToken</code> was the very token used to request it. An empty page reached <em>after</em> items have been collected is treated as the successful end of pagination &mdash; the collected items are stored normally and the repeated token is never followed. Otherwise the refresh is abandoned when any of the following happens:</p>
                 <table class="widefat striped maw-table maw-about-table">
                     <thead><tr><th>Reason code</th><th>Meaning</th></tr></thead>
                     <tbody>
-                        <tr><td><code>repeated_page_token</code></td><td>A page token was offered twice, so pagination would have looped.</td></tr>
-                        <tr><td><code>empty_page_with_next_token</code></td><td>A page returned no items yet still supplied another token.</td></tr>
+                        <tr><td><code>repeated_page_token</code></td><td>A nonempty page offered a token that was already used, so pagination would have looped.</td></tr>
+                        <tr><td><code>empty_page_with_next_token</code></td><td>The first page returned no items at all yet still supplied another token.</td></tr>
                         <tr><td><code>malformed_response</code></td><td>The body was not valid JSON, or was missing <code>items</code> / <code>pageInfo</code>.</td></tr>
                         <tr><td><code>maximum_pages_reached</code></td><td>The configured page ceiling was reached.</td></tr>
                         <tr><td><code>daily_limit_reached</code></td><td>The daily call budget is spent; nothing was sent.</td></tr>

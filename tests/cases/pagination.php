@@ -88,15 +88,44 @@ return [
         maw_assert_same(2, $guard['pages'] ?? 0, 'the event records two pages requested');
     },
 
-    'an empty items page with another token aborts the refresh' => static function (): void {
-        maw_queue_json(maw_youtube_page(50, 'TOKEN-1', 4000, 0));
-        maw_queue_json(maw_youtube_page(0, 'TOKEN-2', 4000, 50));
-        maw_queue_json(maw_youtube_page(50, 'TOKEN-3', 4000, 50));
+    'an empty page after collected items ends pagination successfully' => static function (): void {
+        // The observed API sequence: totalResults reports 67, only 61 items are
+        // accessible, and the tail page echoes back the token that fetched it.
+        maw_queue_json(maw_youtube_page(50, 'TOKEN-1', 67, 0));
+        maw_queue_json(maw_youtube_page(11, 'TOKEN-2', 67, 50));
+        maw_queue_json(maw_youtube_page(0, 'TOKEN-2', 67, 61));
+        // A fourth response is queued to prove the echoed token is never followed.
+        maw_queue_json(maw_youtube_page(50, 'TOKEN-3', 67, 61));
 
         $state = maw_run_youtube_load(maw_youtube_config());
 
-        maw_assert_same(2, count(MawTestState::$httpRequests), 'the loop stops at the empty page');
+        maw_assert_same(3, count(MawTestState::$httpRequests), 'exactly three HTTP requests are made');
+        maw_assert(
+            str_contains(MawTestState::$httpRequests[2], 'pageToken=TOKEN-2'),
+            'the third request is the one that returned no items'
+        );
+        maw_assert_same(false, $state['errorLoadingData'], 'the refresh succeeds');
+        maw_assert_same(61, count($state['parsedData']), 'all 61 accessible items are kept');
+        maw_assert_same('Episode 61', $state['parsedData'][60]['title'], 'the last accessible item is present');
+        maw_assert_same(null, YoutubeGuard::getGuardStatus(), 'no guard event is recorded');
+
+        maw_assert_same(61, count(get_transient('youtube_testshow')), 'the transient holds all 61 items');
+
+        $backup = json_decode((string) file_get_contents(maw_backup_path('testshow')), true);
+        maw_assert_same(61, count($backup['data']), 'the backup file holds all 61 items');
+        maw_assert(get_option('maw_yt_last_fetched_testshow', 0) > 0, 'the last-fetched timestamp is set');
+    },
+
+    'an empty first page with another token still aborts the refresh' => static function (): void {
+        maw_queue_json(maw_youtube_page(0, 'TOKEN-1', 4000, 0));
+        // A second response is queued to prove it is never requested.
+        maw_queue_json(maw_youtube_page(50, 'TOKEN-2', 4000, 0));
+
+        $state = maw_run_youtube_load(maw_youtube_config());
+
+        maw_assert_same(1, count(MawTestState::$httpRequests), 'the loop stops at the empty first page');
         maw_assert_same(true, $state['errorLoadingData'], 'the refresh is reported as failed');
+        maw_assert_same([], $state['parsedData'], 'no data is returned');
         maw_assert_same(
             'empty_page_with_next_token',
             YoutubeGuard::getGuardStatus()['reason'] ?? '',

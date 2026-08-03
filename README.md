@@ -544,12 +544,14 @@ Pagination follows YouTube's documented model: the first request carries no page
 
 `pageInfo.totalResults` is deliberately **not** used as the loop's exit condition. For `playlistItems` it counts entries the API will not return (deleted or private videos), so a loop that waits for the collected-item tally to reach it can never satisfy its own exit condition and ends up relying entirely on the token.
 
+That same gap produces a second termination shape. A playlist reporting 67 `totalResults` returned 50 items, then 11, then a page with an empty `items` array whose `nextPageToken` was the very token used to request it. An empty page reached **after** items have been collected is therefore treated as the successful end of pagination: the collected items are promoted normally and the echoed token is never followed. An empty **first** page that still supplies a token remains an abort.
+
 Every page token used is remembered, a request is only ever issued for page 1 or for a nonempty previously-unseen token, and all URL parameters are encoded. The refresh is abandoned when any of these occurs:
 
 | Reason code | Meaning |
 |---|---|
-| `repeated_page_token` | A page token was offered twice, so pagination would have looped. |
-| `empty_page_with_next_token` | A page returned no items yet still supplied another token. |
+| `repeated_page_token` | A nonempty page offered a token that was already used, so pagination would have looped. |
+| `empty_page_with_next_token` | The first page returned no items at all yet still supplied another token. |
 | `malformed_response` | The body was not valid JSON, or was missing `items` / `pageInfo`. |
 | `maximum_pages_reached` | The configured page ceiling was reached. |
 | `daily_limit_reached` | The daily call budget is spent; nothing was sent. |
@@ -729,3 +731,4 @@ document.addEventListener("mediaApiWidgetItemClick", (e) => {
 - The `mutiplegridtext` attribute (legacy typo) is automatically aliased to `multiplegridtext`.
 - The two guard settings added in 4.8.0 are read from the existing `maw_cache_expirations` option. Installs that predate them receive the defaults at read time — no resave is required, no existing option name or value changes, and reading the settings does not rewrite what is stored.
 - The backup columns added to the API Stats page in 4.9.0 are purely read-only reporting over the backup files the plugin already wrote. No file name, location, or write rule changed, no new option or database column was introduced, and installs with backups predating the `time_stored` key still report a timestamp via the file modification time.
+- The pagination change in 4.10.0 only widens what counts as a successful refresh: an empty tail page reached after items have been collected now ends pagination normally instead of aborting. No setting, option, transient name, backup file format, or guard reason code changed, and a healthy playlist produces byte-identical output. Playlists that were failing every refresh on this shape begin succeeding on their next refresh with no intervention; the `empty_page_with_next_token` guard reason is still recorded when the very first page returns no items.

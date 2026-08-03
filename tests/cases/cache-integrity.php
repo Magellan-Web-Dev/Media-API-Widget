@@ -47,6 +47,26 @@ return [
         maw_assert_same(false, $state['errorLoadingData'], 'no error is reported');
     },
 
+    'an empty tail page promotes the collected items over the good backup' => static function (): void {
+        $good = maw_seed_good_backup();
+
+        // 67 reported, 61 accessible, tail page echoes the token that fetched it.
+        maw_queue_json(maw_youtube_page(50, 'TOKEN-1', 67, 0));
+        maw_queue_json(maw_youtube_page(11, 'TOKEN-2', 67, 50));
+        maw_queue_json(maw_youtube_page(0, 'TOKEN-2', 67, 61));
+
+        $state = maw_run_youtube_load(maw_youtube_config());
+
+        $stored = (string) file_get_contents(maw_backup_path('testshow'));
+
+        maw_assert($good !== $stored, 'the stale backup is replaced');
+        maw_assert_same(61, count(json_decode($stored, true)['data']), 'the backup holds all 61 items');
+        maw_assert_same(61, count(get_transient('youtube_testshow')), 'the transient holds all 61 items');
+        maw_assert(get_option('maw_yt_last_fetched_testshow', 0) > 0, 'the last-fetched timestamp is set');
+        maw_assert_same(false, $state['errorLoadingData'], 'no error is reported');
+        maw_assert_same(null, YoutubeGuard::getGuardStatus(), 'no guard event is recorded');
+    },
+
     'an http error on a later page leaves the good backup intact' => static function (): void {
         $good = maw_seed_good_backup();
 

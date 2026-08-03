@@ -618,7 +618,7 @@ final class YoutubeGuard
     {
         $labels = [
             'repeated_page_token'        => 'A page token repeated (pagination would have looped)',
-            'empty_page_with_next_token' => 'A page returned no items but supplied another page token',
+            'empty_page_with_next_token' => 'The first page returned no items but supplied another page token',
             'malformed_response'         => 'The API response was malformed or not valid JSON',
             'maximum_pages_reached'      => 'The maximum pages per refresh limit was reached',
             'daily_limit_reached'        => 'The daily YouTube call limit was reached',
