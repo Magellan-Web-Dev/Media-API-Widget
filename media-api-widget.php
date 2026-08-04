@@ -2,7 +2,7 @@
 /**
  * Plugin Name:  Media API Widget
  * Description:  Sync YouTube playlists and podcast RSS data to the front end, with admin-managed Media API settings.
- * Version:      4.10.0
+ * Version:      5.0.0
  * Requires at least: 5.0
  * Requires PHP: 8.1
  * Author:       Chris Paschall
@@ -38,7 +38,7 @@ if (version_compare(PHP_VERSION, '8.1', '<')) {
  */
 } else {
 
-    define('MAW_PLUGIN_VERSION', '4.10.0');
+    define('MAW_PLUGIN_VERSION', '5.0.0');
     define('MAW_PLUGIN_FILE', __FILE__);
     define('MAW_PLUGIN_DIR', plugin_dir_path(__FILE__));
     define('MAW_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -46,6 +46,16 @@ if (version_compare(PHP_VERSION, '8.1', '<')) {
     require_once MAW_PLUGIN_DIR . 'src/Autoloader.php';
 
     MediaApiWidget\Autoloader::boot(MAW_PLUGIN_DIR);
+
+    /**
+     * Public global functions for the data enrichment API.
+     *
+     * Required after the autoloader so the functions can reference plugin
+     * classes lazily. The autoloader maps class names only, so this file has to
+     * be included explicitly for media_api_widget_update_stored_data() and
+     * media_api_widget_get_stored_data() to exist once the plugin has loaded.
+     */
+    require_once MAW_PLUGIN_DIR . 'src/functions.php';
 
     /**
      * Plugin activation: register the rewrite rule, create the API log table,

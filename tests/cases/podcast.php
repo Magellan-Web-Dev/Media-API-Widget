@@ -102,29 +102,22 @@ return [
         maw_queue_json(['results' => [['feedUrl' => 'https://feeds.example.com/apple.xml', 'collectionViewUrl' => 'https://podcasts.apple.com/x']]]);
         maw_queue_raw(maw_podcast_rss());
 
-        // PRE-EXISTING DEFECT, unrelated to the YouTube guards and deliberately
-        // left unfixed here because it is outside this change's scope:
-        // loadPodcastData() hands the raw wp_remote_get() array straight to
-        // parseRssFeed(?string $rssFeedInput), so every Apple/iTunes lookup
-        // platform ('omny', 'soundcloud', 'buzzsprout', 'other') throws a
-        // TypeError. This test pins the current behavior and still asserts the
-        // guard invariant that matters: the lookup consumed no YouTube budget.
-        $threw = false;
-        try {
-            maw_run_podcast_load(maw_podcast_config([
-                'podcast_platform' => 'omny',
-                'media_data'       => '123456789',
-            ]));
-        } catch (TypeError $e) {
-            $threw = true;
-            maw_assert(
-                str_contains($e->getMessage(), 'parseRssFeed'),
-                'the pre-existing failure is the parseRssFeed argument type, not a guard change'
-            );
-        }
+        // Until 5.0.0 this path threw a TypeError, because loadPodcastData()
+        // handed the raw wp_remote_get() array to parseRssFeed(?string). It now
+        // passes the response body, so the lookup and the RSS fetch both
+        // complete — which is what lets the extension-api group assert that a
+        // successful lookup followed by a *failed* RSS fetch fires no hooks.
+        $state = maw_run_podcast_load(maw_podcast_config([
+            'podcast_platform' => 'omny',
+            'media_data'       => '123456789',
+        ]));
 
-        maw_assert_same(true, $threw, 'the Apple lookup path still fails exactly as it did before this change');
-        maw_assert_same(1, count(MawTestState::$httpRequests), 'the iTunes lookup request went outbound');
+        maw_assert_same(false, $state['errorLoadingData'], 'the Apple lookup path completes successfully');
+        maw_assert_same(2, count(MawTestState::$httpRequests), 'the iTunes lookup and the RSS feed are both fetched');
+        maw_assert(
+            str_contains(MawTestState::$httpRequests[0], 'itunes.apple.com/lookup?id=123456789'),
+            'the Apple podcast id is sent to the iTunes lookup endpoint'
+        );
         maw_assert_same(0, YoutubeGuard::getDailyCallCount(), 'the YouTube daily counter stays at zero');
         maw_assert_same(null, YoutubeGuard::getGuardStatus(), 'no YouTube guard event is recorded');
     },

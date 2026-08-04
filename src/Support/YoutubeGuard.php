@@ -15,7 +15,9 @@ if (!defined('ABSPATH')) { exit; }
  *      reserved *before* a request goes outbound, so requests that fail still
  *      consume their slot — failed YouTube calls can still cost quota.
  *   2. A genuinely atomic per-playlist refresh lock, so simultaneous cache
- *      misses cannot all start fetching the same playlist.
+ *      misses cannot all start fetching the same playlist. The lock primitive
+ *      itself lives in {@see OptionLock}, which {@see MediaStore} also uses for
+ *      its separate per-playlist storage lock.
  *   3. A single sanitized "guard event" record per aborted refresh, so an
  *      administrator can see why fetching stopped without any secret being
  *      written anywhere.
@@ -98,6 +100,7 @@ final class YoutubeGuard
         'daily_limit_reached',
         'concurrent_refresh',
         'http_error',
+        'store_rejected',
     ];
 
     // ---------------------------------------------------------------------
@@ -307,12 +310,10 @@ final class YoutubeGuard
     /**
      * Attempts to acquire the exclusive refresh lock for one playlist.
      *
-     * The lock is a wp_options row created by a bare INSERT, which fails on the
-     * unique `option_name` index when another worker already holds it — a true
-     * compare-and-set. The stored value carries an owner token and an expiry so
-     * a worker killed mid-refresh (a PHP timeout, for instance) cannot block
-     * refreshes permanently: the next caller sees the expiry has passed and
-     * steals the lock with a compare-and-swap against the exact stale value.
+     * Delegates to {@see OptionLock::acquire()}, which implements the atomic
+     * wp_options test-and-set, the owner token, and the expiry-based steal. The
+     * handle shape and every degrade-open behavior are unchanged; only the
+     * option name is this class's concern.
      *
      * @param string $playlistName Playlist slug the lock protects.
      * @param int    $ttlSeconds   How long the lock stays valid before it may be stolen.
@@ -322,78 +323,21 @@ final class YoutubeGuard
      */
     public static function acquireLock(string $playlistName, int $ttlSeconds, ?int $now = null): ?array
     {
-        global $wpdb;
-
-        $now  = $now ?? time();
-        $ttl  = max(1, $ttlSeconds);
-        $name = self::lockOptionName($playlistName);
-
-        // No usable database handle: fall back to a handle that releases as a
-        // no-op. The legacy in-progress transient remains as a soft guard.
-        if (!is_object($wpdb)) {
-            return ['name' => $name, 'value' => '', 'fallback' => true];
-        }
-
-        $value = self::buildLockValue($now + $ttl);
-
-        if (self::insertLockRow($name, $value)) {
-            return ['name' => $name, 'value' => $value, 'fallback' => false];
-        }
-
-        $existing = self::readRawOption($name);
-
-        // The INSERT failed but no row exists, so the failure was environmental
-        // rather than a genuine conflict. Degrade to permitting the refresh.
-        if ($existing === null) {
-            return ['name' => $name, 'value' => '', 'fallback' => true];
-        }
-
-        if (!self::isLockExpired($existing, $now)) {
-            return null;
-        }
-
-        // Stale or unparseable lock: steal it, but only if nobody else changed
-        // the row in the meantime.
-        $stolen = self::compareAndSwapOption($name, $existing, $value);
-
-        return $stolen ? ['name' => $name, 'value' => $value, 'fallback' => false] : null;
+        return OptionLock::acquire(self::lockOptionName($playlistName), $ttlSeconds, $now);
     }
 
     /**
      * Releases a lock previously returned by {@see self::acquireLock()}.
      *
-     * The DELETE matches on the stored value as well as the name, so a worker
-     * whose lock was already stolen after expiring cannot delete the new
-     * owner's lock. Safe to call with null or a fallback handle.
+     * Safe to call with null or a fallback handle. A worker whose lock was
+     * already stolen after expiring cannot delete the new owner's lock.
      *
      * @param array<string,mixed>|null $lock Lock handle, or null.
      * @return void
      */
     public static function releaseLock(?array $lock): void
     {
-        global $wpdb;
-
-        if ($lock === null || !empty($lock['fallback']) || !is_object($wpdb)) {
-            return;
-        }
-
-        $name  = (string) ($lock['name'] ?? '');
-        $value = (string) ($lock['value'] ?? '');
-        if ($name === '' || $value === '') {
-            return;
-        }
-
-        $suppressed = $wpdb->suppress_errors(true);
-        $wpdb->query(
-            $wpdb->prepare(
-                "DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s",
-                $name,
-                $value
-            )
-        );
-        $wpdb->suppress_errors($suppressed);
-
-        self::forgetOption($name);
+        OptionLock::release($lock);
     }
 
     /**
@@ -405,121 +349,6 @@ final class YoutubeGuard
     public static function lockOptionName(string $playlistName): string
     {
         return self::OPTION_LOCK_PREFIX . sanitize_key($playlistName);
-    }
-
-    /**
-     * Builds the JSON lock value containing a fresh owner token and expiry.
-     *
-     * @param int $expiresAt Unix timestamp after which the lock may be stolen.
-     * @return string JSON encoded lock value.
-     */
-    private static function buildLockValue(int $expiresAt): string
-    {
-        $token = function_exists('wp_generate_password')
-            ? wp_generate_password(20, false, false)
-            : bin2hex(random_bytes(10));
-
-        return (string) wp_json_encode([
-            'owner'   => $token . '-' . getmypid(),
-            'expires' => $expiresAt,
-        ]);
-    }
-
-    /**
-     * Returns whether a stored lock value has expired.
-     *
-     * A value that cannot be parsed, or that carries no usable expiry, is
-     * treated as expired so a corrupted row can never wedge refreshes.
-     *
-     * @param string $storedValue Raw option value read from the database.
-     * @param int    $now         Unix timestamp to compare against.
-     * @return bool True when the lock is stale and may be stolen.
-     */
-    private static function isLockExpired(string $storedValue, int $now): bool
-    {
-        $decoded = json_decode($storedValue, true);
-
-        if (!is_array($decoded) || !isset($decoded['expires'])) {
-            return true;
-        }
-
-        return (int) $decoded['expires'] <= $now;
-    }
-
-    /**
-     * Inserts the lock row, returning false when the row already exists.
-     *
-     * Deliberately a bare INSERT: the duplicate-key failure on wp_options'
-     * unique `option_name` index is what makes this an atomic test-and-set.
-     * Database errors are suppressed so an expected conflict does not surface
-     * as a visible SQL error.
-     *
-     * @param string $name  Option name.
-     * @param string $value Option value.
-     * @return bool True when this caller created the row.
-     */
-    private static function insertLockRow(string $name, string $value): bool
-    {
-        global $wpdb;
-
-        $suppressed = $wpdb->suppress_errors(true);
-        $result     = $wpdb->query(
-            $wpdb->prepare(
-                "INSERT INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')",
-                $name,
-                $value
-            )
-        );
-        $wpdb->suppress_errors($suppressed);
-
-        self::forgetOption($name);
-
-        return $result === 1 || $result === true;
-    }
-
-    /**
-     * Replaces an option's value only if it still holds the expected value.
-     *
-     * @param string $name     Option name.
-     * @param string $expected The value the row must currently hold.
-     * @param string $value    The new value to store.
-     * @return bool True when exactly this caller performed the swap.
-     */
-    private static function compareAndSwapOption(string $name, string $expected, string $value): bool
-    {
-        global $wpdb;
-
-        $suppressed = $wpdb->suppress_errors(true);
-        $result     = $wpdb->query(
-            $wpdb->prepare(
-                "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s",
-                $value,
-                $name,
-                $expected
-            )
-        );
-        $wpdb->suppress_errors($suppressed);
-
-        self::forgetOption($name);
-
-        return $result === 1 || $result === true;
-    }
-
-    /**
-     * Reads an option's raw stored value directly from the database.
-     *
-     * @param string $name Option name.
-     * @return string|null Raw value, or null when the row does not exist.
-     */
-    private static function readRawOption(string $name): ?string
-    {
-        global $wpdb;
-
-        $value = $wpdb->get_var(
-            $wpdb->prepare("SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1", $name)
-        );
-
-        return $value === null ? null : (string) $value;
     }
 
     /**
@@ -624,6 +453,7 @@ final class YoutubeGuard
             'daily_limit_reached'        => 'The daily YouTube call limit was reached',
             'concurrent_refresh'         => 'Another refresh for this playlist was already running',
             'http_error'                 => 'An HTTP or connection error occurred',
+            'store_rejected'             => 'The fetched data was rejected before or during storage',
         ];
 
         return $labels[$reason] ?? $reason;

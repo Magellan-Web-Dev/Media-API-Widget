@@ -158,8 +158,8 @@ final class StatsPage
                 <p class="description" style="margin-top: 20px;">
                     Backup JSON is stored in <code>uploads/media-api-widget/backups/</code> and is served when a live API call fails.
                     A YouTube backup is written only after a refresh completes every requested page, so the timestamp above is the last
-                    <em>successful</em> store rather than the last attempt. Podcast backups are written for direct RSS feeds; Apple-lookup
-                    and embed platforms have no backup file.
+                    <em>successful</em> store rather than the last attempt. Podcast backups are written for every platform that fetches an
+                    RSS feed, including Apple-lookup platforms; only embed platforms have no backup file.
                 </p>
             <?php endif; ?>
 

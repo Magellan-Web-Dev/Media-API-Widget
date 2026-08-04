@@ -52,6 +52,40 @@ final class MawTestState
 
     /** @var int|null Frozen time() value, or null to use the real clock. */
     public static ?int $now = null;
+
+    /**
+     * Registered hook callbacks: tag => priority => list of callbacks.
+     *
+     * @var array<string,array<int,array<int,array{callback:callable,accepted_args:int}>>>
+     */
+    public static array $hooks = [];
+
+    /**
+     * Every apply_filters()/do_action() invocation, in order, with its arguments.
+     *
+     * This is what lets a test assert that a hook fired exactly once, and with
+     * exactly which playlist name, media type, and source.
+     *
+     * @var array<int,array{tag:string,args:array<int,mixed>}>
+     */
+    public static array $hookCalls = [];
+
+    /**
+     * When true, set_transient() refuses to store and returns false.
+     *
+     * Simulates a genuinely failed option write so the storage layer's
+     * "retain the old good data" path can be exercised.
+     */
+    public static bool $failTransientWrites = false;
+
+    /**
+     * When true, set_transient() stores the value but still returns false.
+     *
+     * Real WordPress routes set_transient() to update_option(), which reports
+     * false when the stored value is already identical. A store must treat that
+     * as success, not as a failed write.
+     */
+    public static bool $transientWriteReturnsFalse = false;
 }
 
 /**
@@ -69,6 +103,11 @@ function maw_test_reset(): void
     MawTestState::$apiLog       = [];
     MawTestState::$cache        = [];
     MawTestState::$now          = null;
+    MawTestState::$hooks        = [];
+    MawTestState::$hookCalls    = [];
+
+    MawTestState::$failTransientWrites        = false;
+    MawTestState::$transientWriteReturnsFalse = false;
 
     $wpdb->reset();
 
@@ -77,6 +116,10 @@ function maw_test_reset(): void
     // actual file path rather than a mock.
     $backupDir = sys_get_temp_dir() . '/maw-tests-uploads/media-api-widget/backups';
     if (is_dir($backupDir)) {
+        // A backup-write-failure test makes this directory read-only. Restore it
+        // first so a test that failed part-way cannot wedge every later test.
+        @chmod($backupDir, 0777);
+
         foreach ((array) glob($backupDir . '/*.json') as $file) {
             if (is_string($file)) {
                 @unlink($file);
@@ -498,16 +541,24 @@ function get_transient(string $name)
  * @param string $name  Transient name.
  * @param mixed  $value Value to store.
  * @param int    $ttl   Lifetime in seconds (0 = no expiry).
- * @return bool Always true.
+ * @return bool True on success; false when a failure is being injected.
  */
 function set_transient(string $name, $value, int $ttl = 0): bool
 {
+    // Injected hard failure: nothing is stored, mirroring an option write that
+    // could not complete.
+    if (MawTestState::$failTransientWrites) {
+        return false;
+    }
+
     MawTestState::$transients[$name] = [
         'value'   => $value,
         'expires' => $ttl > 0 ? maw_test_time() + $ttl : 0,
     ];
 
-    return true;
+    // Injected ambiguous failure: the value *was* stored, but false is returned,
+    // exactly as real WordPress does when the value did not change.
+    return !MawTestState::$transientWriteReturnsFalse;
 }
 
 /**
@@ -729,12 +780,175 @@ function wp_date(string $format, int $timestamp): string
     return gmdate($format, $timestamp);
 }
 
+/**
+ * @param string $text         Text to strip.
+ * @param bool   $removeBreaks Whether to collapse whitespace too.
+ * @return string Plain text.
+ */
+function wp_strip_all_tags(string $text, bool $removeBreaks = false): string
+{
+    $text = strip_tags($text);
+
+    if ($removeBreaks) {
+        $text = (string) preg_replace('/[\r\n\t ]+/', ' ', $text);
+    }
+
+    return trim($text);
+}
+
+// ---------------------------------------------------------------------------
+// Hooks
+// ---------------------------------------------------------------------------
+//
+// A real (if small) hook registry rather than no-op stubs. The extension API's
+// whole contract is about *when* a hook fires and *what* it receives, so tests
+// need to register callbacks, count invocations, inspect arguments, and let a
+// filter actually change the value. Priority ordering and accepted_args are
+// honored so a callback registered the way the README documents behaves the way
+// the README says.
+
+/**
+ * @param string   $tag          Hook name.
+ * @param callable $callback     Callback to register.
+ * @param int      $priority     Lower runs earlier.
+ * @param int      $acceptedArgs How many arguments the callback wants.
+ * @return bool Always true, matching WordPress.
+ */
+function add_filter(string $tag, callable $callback, int $priority = 10, int $acceptedArgs = 1): bool
+{
+    MawTestState::$hooks[$tag][$priority][] = [
+        'callback'      => $callback,
+        'accepted_args' => $acceptedArgs,
+    ];
+
+    return true;
+}
+
+/**
+ * @param string   $tag          Hook name.
+ * @param callable $callback     Callback to register.
+ * @param int      $priority     Lower runs earlier.
+ * @param int      $acceptedArgs How many arguments the callback wants.
+ * @return bool Always true, matching WordPress.
+ */
+function add_action(string $tag, callable $callback, int $priority = 10, int $acceptedArgs = 1): bool
+{
+    return add_filter($tag, $callback, $priority, $acceptedArgs);
+}
+
+/**
+ * Runs every callback registered for a tag, threading the value through.
+ *
+ * @param string $tag   Hook name.
+ * @param mixed  $value Value to filter.
+ * @param mixed  ...$args Additional arguments passed to callbacks.
+ * @return mixed The filtered value.
+ */
+function apply_filters(string $tag, $value, ...$args)
+{
+    MawTestState::$hookCalls[] = [
+        'tag'  => $tag,
+        'args' => array_merge([$value], $args),
+    ];
+
+    if (!isset(MawTestState::$hooks[$tag])) {
+        return $value;
+    }
+
+    $byPriority = MawTestState::$hooks[$tag];
+    ksort($byPriority);
+
+    foreach ($byPriority as $callbacks) {
+        foreach ($callbacks as $registered) {
+            $callArgs = array_merge([$value], $args);
+            $callArgs = array_slice($callArgs, 0, max(1, $registered['accepted_args']));
+
+            $value = ($registered['callback'])(...$callArgs);
+        }
+    }
+
+    return $value;
+}
+
+/**
+ * Runs every callback registered for a tag, discarding return values.
+ *
+ * @param string $tag     Hook name.
+ * @param mixed  ...$args Arguments passed to callbacks.
+ * @return void
+ */
+function do_action(string $tag, ...$args): void
+{
+    MawTestState::$hookCalls[] = [
+        'tag'  => $tag,
+        'args' => $args,
+    ];
+
+    if (!isset(MawTestState::$hooks[$tag])) {
+        return;
+    }
+
+    $byPriority = MawTestState::$hooks[$tag];
+    ksort($byPriority);
+
+    foreach ($byPriority as $callbacks) {
+        foreach ($callbacks as $registered) {
+            $callArgs = array_slice($args, 0, max(1, $registered['accepted_args']));
+
+            ($registered['callback'])(...$callArgs);
+        }
+    }
+}
+
+/**
+ * @param string $tag Hook name.
+ * @return bool True when at least one callback is registered.
+ */
+function has_filter(string $tag): bool
+{
+    return !empty(MawTestState::$hooks[$tag]);
+}
+
+/**
+ * @param string $tag Hook name.
+ * @return bool Always true.
+ */
+function remove_all_filters(string $tag): bool
+{
+    unset(MawTestState::$hooks[$tag]);
+
+    return true;
+}
+
+/**
+ * @param string $tag Hook name.
+ * @return int How many times the tag has been fired this test.
+ */
+function did_action(string $tag): int
+{
+    $count = 0;
+
+    foreach (MawTestState::$hookCalls as $call) {
+        if ($call['tag'] === $tag) {
+            $count++;
+        }
+    }
+
+    return $count;
+}
+
 // ---------------------------------------------------------------------------
 // Plugin autoloader
 // ---------------------------------------------------------------------------
 
 require_once dirname(__DIR__) . '/src/Autoloader.php';
 MediaApiWidget\Autoloader::boot(dirname(__DIR__));
+
+// The autoloader maps class names only, so the public global functions have to be
+// included explicitly, exactly as the plugin bootstrap does inside its PHP 8.1
+// version guard. Loading them here means the tests exercise the same function
+// definitions a site does.
+require_once dirname(__DIR__) . '/src/functions.php';
 
 // The real SafeRemoteRequest and ApiCallLogger reach out to the network and to
 // a database table respectively. Both are already loaded by the autoloader when

@@ -9,7 +9,10 @@ if (!defined('ABSPATH')) { exit; }
  * Provides an in-admin reference guide covering every feature of the
  * Media API Widget plugin: admin setup, shortcode fields, all four
  * shortcode tags with copy-paste examples, the full attribute reference,
- * grid mode, the podcast player, SEO meta tags, and caching architecture.
+ * grid mode, the podcast player, SEO meta tags, caching architecture, and
+ * the developer hooks and data-enrichment API — the pre-store filter, the
+ * post-storage action, and the stored-data updater function, together with
+ * the recommended asynchronous transcription workflow.
  *
  * All page content is static HTML generated server-side; no database
  * reads are performed beyond the capability check.
@@ -51,6 +54,7 @@ final class AboutPage
                 <a href="#maw-seo">SEO</a>
                 <a href="#maw-caching">Caching</a>
                 <a href="#maw-js-events">JS Events</a>
+                <a href="#maw-dev-hooks">Developer Hooks</a>
             </nav>
 
             <!-- OVERVIEW -->
@@ -597,7 +601,7 @@ document.addEventListener("mediaApiWidgetItemClick", (e) =&gt; {
                         <tr><td>Backup File</td><td>A <strong>Download</strong> link that streams the JSON file straight to your browser, with its size beside it. Shows an em dash when there is nothing to download.</td></tr>
                     </tbody>
                 </table>
-                <p>A backup is written only after a refresh completes every requested page, so the timestamp is the last <em>successful</em> store &mdash; not the last attempt. If a refresh fails part-way, the previous good backup and its timestamp are left exactly as they were, which is why an old timestamp next to a row full of errors is the expected, healthy result. A YouTube playlist has a backup once any refresh has succeeded; podcasts using a direct RSS feed have one, while Apple-lookup and embed platforms have no backup file.</p>
+                <p>A backup is written only after a refresh completes every requested page, so the timestamp is the last <em>successful</em> store &mdash; not the last attempt. If a refresh fails part-way, the previous good backup and its timestamp are left exactly as they were, which is why an old timestamp next to a row full of errors is the expected, healthy result. A YouTube playlist has a backup once any refresh has succeeded. As of 5.0.0 so does every podcast platform that fetches an RSS feed &mdash; direct feeds and Apple-lookup platforms alike, including caches warmed by a shortcode. Only embed platforms have no backup file, because they make no API call and store just the embed URL.</p>
 
                 <div class="maw-callout">
                     <strong>Downloads are gated, and read-only:</strong> the link goes through <code>admin-post.php</code> rather than a public uploads URL, so every request is checked for the <code>manage_options</code> capability and a valid nonce, and the path is resolved and confirmed to sit inside the backups directory before any bytes are sent. Nothing on the Stats page can write, replace, or delete a backup file.
@@ -619,6 +623,7 @@ document.addEventListener("mediaApiWidgetItemClick", (e) =&gt; {
                         <tr><td><code>daily_limit_reached</code></td><td>The daily call budget is spent; nothing was sent.</td></tr>
                         <tr><td><code>concurrent_refresh</code></td><td>Another worker already held this playlist's refresh lock.</td></tr>
                         <tr><td><code>http_error</code></td><td>A connection failure or a non-200 status on any page.</td></tr>
+                        <tr><td><code>store_rejected</code></td><td>A callback refused the fetched data, or it could not be stored. See <a href="#maw-dev-hooks">Developer Hooks</a>.</td></tr>
                     </tbody>
                 </table>
 
@@ -631,6 +636,151 @@ document.addEventListener("mediaApiWidgetItemClick", (e) =&gt; {
 
                 <h4>Concurrency</h4>
                 <p>Simultaneous cache misses for the same playlist no longer all start fetching. A refresh takes an atomic per-playlist lock (a <code>maw_yt_lock_{playlist_name}</code> row created by a bare insert, so the database's unique-name constraint does the arbitration) carrying an owner token and expiry. Only the owner can release it, the release runs on every exit path including thrown exceptions, and a lock left behind by a worker that died mid-refresh is reclaimed once it expires &mdash; so a stale lock can never block refreshes permanently.</p>
+                <p>A second, separate lock (<code>maw_media_data_lock_{media_type}_{playlist_name}</code>) is held around the moment data is written, by every writer: refreshes, shortcode cache warm-ups, and the developer updater function. It keeps a refresh and an enrichment write from interleaving, so the transient and the backup file can never end up disagreeing.</p>
+            </section>
+
+            <!-- DEVELOPER HOOKS -->
+            <section id="maw-dev-hooks" class="maw-section">
+                <h2>Developer Hooks / Data Enrichment</h2>
+                <p>Two PHP hooks and two global functions let other code alter the playlist data this plugin stores. They exist for asynchronous enrichment &mdash; attaching transcript status, custom metadata, or anything else derived from an episode &mdash; without forking the plugin or re-fetching from the API. All four are stable public API; the classes behind them are internal.</p>
+
+                <h3>Filter &mdash; <code>media_api_widget_data_before_store</code></h3>
+                <p>Alters successfully fetched and parsed data immediately before it is written.</p>
+                <pre class="maw-code">$data = apply_filters(
+    'media_api_widget_data_before_store',
+    $data,
+    $context
+);</pre>
+                <p><strong>Fires</strong> exactly once per complete, successful remote refresh. For a paginated YouTube playlist it fires once for the whole playlist after every page has completed &mdash; <em>not</em> once per page.</p>
+                <p><strong>Never fires</strong> for a transient cache hit, a backup file read, a partial refresh (page ceiling, repeated page token, daily limit), a malformed response, an HTTP failure, a request blocked by the concurrency lock, an RSS feed that fails to fetch or parse, an Apple/iTunes lookup whose RSS fetch then fails, or an embed-only podcast (which makes no API call).</p>
+                <p>The value you return is exactly what gets stored <em>and</em> what the current page render uses, so the response and storage can never disagree.</p>
+
+                <div class="maw-callout">
+                    <strong>Return values are validated.</strong> Returning a <code>WP_Error</code>, a value that does not match the documented shape for the media type, or a value that cannot be JSON encoded makes the refresh count as <em>failed</em>: nothing is written, the previous transient and backup file are left byte-for-byte intact, and a <code>store_rejected</code> guard event is recorded above. A callback that throws is contained the same way rather than breaking the page.
+                </div>
+
+                <h3>Action &mdash; <code>media_api_widget_data_stored</code></h3>
+                <p>Fires after data has been written successfully. It does not fire for a rejected store.</p>
+                <pre class="maw-code">do_action(
+    'media_api_widget_data_stored',
+    $data,
+    $context
+);</pre>
+
+                <div class="maw-callout">
+                    <strong>Callbacks run synchronously</strong> inside the request that performed the refresh &mdash; for the front-end pipeline, that is inside <code>wp_head</code> on a visitor's page view. Never call a transcription API, or anything else slow, directly from a callback. Enqueue a WP-Cron event or an Action Scheduler job instead. The action is post-commit: the data is already stored, so a callback that throws is logged and discarded and cannot undo the store.
+                </div>
+
+                <h3>The <code>$context</code> Array (both hooks)</h3>
+                <table class="widefat striped maw-table maw-about-table">
+                    <thead><tr><th style="width:190px;">Key</th><th style="width:130px;">Type</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>playlist_name</code></td><td><code>string</code></td><td>The <code>playlist_name</code> slug of the media item.</td></tr>
+                        <tr><td><code>media_type</code></td><td><code>string</code></td><td><code>youtube</code> or <code>podcast</code>.</td></tr>
+                        <tr><td><code>source</code></td><td><code>string</code></td><td><code>remote_refresh</code> (the front-end pipeline), <code>shortcode_warmup</code> (a shortcode rendered before the cache was warm), or <code>manual_update</code> (a write from the updater function below).</td></tr>
+                        <tr><td><code>podcast_platform</code></td><td><code>string | null</code></td><td>The podcast platform slug. <code>null</code> for YouTube.</td></tr>
+                    </tbody>
+                </table>
+                <p class="description">No API key, credential, request URL, or response body is ever placed in the context.</p>
+
+                <h3>Data Shapes</h3>
+                <p><strong>YouTube</strong> &mdash; an indexed list of media item arrays, each with at least <code>title</code>, <code>id</code> (the video ID), <code>episode</code>, <code>thumbnail</code>, <code>publishedDate</code>, and <code>description</code>. An empty list is valid.</p>
+                <p><strong>Podcast</strong> &mdash; the parsed RSS feed normalized to a plain nested array, so callbacks can use ordinary array syntax:</p>
+                <pre class="maw-code">[
+    'channel' =&gt; [
+        'title'             =&gt; 'My Show',
+        'rssUrl'            =&gt; 'https://example.com/feed.xml',
+        'collectionViewUrl' =&gt; 'https://podcasts.apple.com/&hellip;',
+        'item'              =&gt; [
+            ['title' =&gt; '&hellip;', 'description' =&gt; '&hellip;', 'guid' =&gt; '&hellip;', 'pubDate' =&gt; '&hellip;'],
+            &hellip;
+        ],
+    ],
+]</pre>
+                <p><code>channel.item</code> is an associative array rather than a list for a single-episode feed, and may be absent for a feed with no episodes &mdash; handle both. Custom keys you add to individual items are preserved; only the container shape is validated. Storage formats are unchanged: the YouTube transient holds a PHP array, the podcast transient a JSON string.</p>
+
+                <h3>Example &mdash; Mark Every Item Pending as It Is Stored</h3>
+                <pre class="maw-code">add_filter(
+    'media_api_widget_data_before_store',
+    static function ($data, array $context) {
+        if (
+            $context['media_type'] !== 'youtube'
+            || $context['playlist_name'] !== 'my_show'
+        ) {
+            return $data;
+        }
+
+        foreach ($data as &amp;$item) {
+            $item['transcript_status'] = 'pending';
+        }
+        unset($item);
+
+        return $data;
+    },
+    10,
+    2
+);</pre>
+
+                <h3>Updater &mdash; <code>media_api_widget_update_stored_data()</code></h3>
+                <p>Alters data that has <em>already</em> been stored, without making any API request. Returns the updated data, or a <code>WP_Error</code> on failure.</p>
+                <pre class="maw-code">$result = media_api_widget_update_stored_data(
+    'my_show',
+    'youtube',
+    static function ($data, array $context) {
+        foreach ($data as &amp;$item) {
+            if (($item['id'] ?? '') === 'YOUTUBE_VIDEO_ID') {
+                $item['transcript_status'] = 'complete';
+                $item['transcript_url'] = 'https://example.com/transcripts/YOUTUBE_VIDEO_ID';
+            }
+        }
+        unset($item);
+
+        return $data;
+    }
+);
+
+if (is_wp_error($result)) {
+    // Nothing was written; the previous good data is intact.
+}</pre>
+                <p>Reads the current data from the transient, falling back to the backup file. Runs your callback while holding the playlist's storage lock, so a refresh cannot land between the read and the write, and releases that lock on success, on error, and on a thrown exception. Writes the result to both the transient and the backup file using the configured cache TTL, replacing the backup by an atomic rename. Validates your return value exactly as the filter's is validated, retaining the old data on any failure. Fires <code>media_api_widget_data_stored</code> with a <code>source</code> of <code>manual_update</code>, and deliberately does <em>not</em> fire the pre-store filter, so an enrichment write cannot loop back into itself.</p>
+                <p>To read stored data without changing it, use <code>media_api_widget_get_stored_data($playlistName, $mediaType)</code>. It makes no external request and returns <code>null</code> when nothing is stored.</p>
+
+                <h3>Recommended Asynchronous Transcription Workflow</h3>
+                <p>This plugin does not integrate with any transcription provider and adds no third-party dependency. The supported pattern is:</p>
+                <ol>
+                    <li>Hook <code>media_api_widget_data_stored</code>.</li>
+                    <li><strong>Ignore events whose <code>source</code> is not <code>remote_refresh</code> or <code>shortcode_warmup</code>.</strong> This is what prevents a loop &mdash; your own writes arrive as <code>manual_update</code>, and acting on them would trigger another write.</li>
+                    <li>Enqueue a WP-Cron event or Action Scheduler job. Do not call the provider from the callback.</li>
+                    <li>Identify YouTube episodes by video ID (<code>$item['id']</code>) and podcast episodes by GUID (<code>$item['guid']</code>).</li>
+                    <li>Call the transcription service asynchronously from that background job.</li>
+                    <li>When the result is ready, write it back with <code>media_api_widget_update_stored_data()</code>.</li>
+                </ol>
+                <pre class="maw-code">add_action(
+    'media_api_widget_data_stored',
+    static function ($data, array $context): void {
+        // Only react to fresh remote data; skip our own manual updates.
+        if (!in_array($context['source'], ['remote_refresh', 'shortcode_warmup'], true)) {
+            return;
+        }
+
+        wp_schedule_single_event(
+            time() + 60,
+            'my_plugin_queue_transcripts',
+            [$context['playlist_name'], $context['media_type']]
+        );
+    },
+    10,
+    2
+);</pre>
+                <p>A remote refresh <em>replaces</em> the stored payload with whatever the API returned, so fields a manual update added are not present in the next refresh's data. The storage lock keeps the two writers from interleaving; it does not merge them. Re-apply derived fields in the pre-store filter, which runs on every refresh, and keep the authoritative record in your own storage.</p>
+
+                <div class="maw-callout">
+                    <strong>Do not store full transcripts in the playlist payload.</strong> Transcripts can be very large, and this payload is not a private server-side cache: the plugin embeds playlist data into page output and copies it into the browser's <code>localStorage</code>. A few hundred kilobytes of transcript per episode becomes a few hundred kilobytes on every page load, for every visitor. Store transcripts separately &mdash; a custom table, a custom post type, post meta, or object storage &mdash; and attach only a small reference to the item: a status, a short excerpt, a database key, a REST URL, or a transcript URL.
+                </div>
+
+                <div class="maw-callout">
+                    <strong>Browser caches propagate on their own schedule.</strong> A server-side update changes the transient and the backup file; it cannot reach into a visitor's browser. Clients that already hold a payload in <code>localStorage</code> keep serving it until the normal media cache and cookie cycle expires, governed by the <strong>Media cache transient</strong> setting on the <a href="<?php echo esc_url(menu_page_url(Menu::CACHING_SLUG, false)); ?>">Caching page</a>. Nothing in this plugin &mdash; or in WordPress &mdash; can delete cookies or <code>localStorage</code> from every visitor's browser from the server. Expect enrichment to appear progressively as clients refresh, not instantly.
+                </div>
             </section>
 
         </div>

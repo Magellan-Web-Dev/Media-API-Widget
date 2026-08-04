@@ -2,6 +2,7 @@
 namespace MediaApiWidget\Frontend;
 
 use MediaApiWidget\Config\Options;
+use MediaApiWidget\Support\MediaStore;
 use MediaApiWidget\Support\SafeRemoteRequest;
 
 if (!defined('ABSPATH')) { exit; }
@@ -480,15 +481,23 @@ final class Shortcode
      * Used when no transient or backup data is available (e.g. a shortcode is
      * rendered before MediaBootstrap has had a chance to warm the cache). Performs
      * an iTunes lookup for non-custom platforms, fetches the RSS URL, parses it
-     * with SimpleXML, normalizes items (strip tags, extract guid/pubDate), and
-     * stores the result in the `podcast_{playlistName}` transient for 2 hours.
+     * with SimpleXML, and normalizes items (strip tags, extract guid/pubDate).
      *
-     * Returns an empty array for embed platforms (no RSS to fetch). Returns null
-     * on any network or parse error.
+     * Persistence is handed to {@see MediaStore::store()}, so this path fires the
+     * same `media_api_widget_data_before_store` filter and
+     * `media_api_widget_data_stored` action as a wp_head refresh — with a `source`
+     * of `shortcode_warmup` — writes the same backup JSON file, and honors the
+     * configured `media_cache_ttl` rather than a fixed lifetime. The value
+     * returned here is the *filtered* payload that was stored, so this request
+     * renders exactly what a later request will read back.
+     *
+     * Returns an empty array for embed platforms (no RSS to fetch, no hooks).
+     * Returns null on any network or parse error, and when a filter refuses the
+     * data — in which case nothing was stored and the previous data is intact.
      *
      * @param string              $playlistName The playlist_name slug.
      * @param array<string,mixed> $mediaConfig  Admin media config array for this playlist.
-     * @return array<string,mixed>|null Parsed and normalized podcast data, or null on failure.
+     * @return array<string,mixed>|null Stored podcast data, or null on failure.
      */
     private function fetchPodcastDataAndWarmCache(string $playlistName, array $mediaConfig): ?array
     {
@@ -569,9 +578,25 @@ final class Shortcode
             }
         }
 
-        set_transient('podcast_' . $playlistName, wp_json_encode($parsed), 7200);
+        // Persist through the shared store rather than writing the transient
+        // directly, so this path cannot bypass the developer hooks, the backup
+        // file, or the configured cache TTL.
+        $store = MediaStore::store(
+            MediaStore::buildContext($playlistName, 'podcast', MediaStore::SOURCE_SHORTCODE_WARMUP, $platform),
+            $parsed,
+            [
+                'ttl'          => (int) (Options::getCacheExpirations()['media_cache_ttl'] ?? 7200),
+                'write_backup' => true,
+            ]
+        );
 
-        return $parsed;
+        // Return what was accepted for storage, not the pre-filter value, so the
+        // response this request renders matches what was stored.
+        if (!is_array($store['data'])) {
+            return null;
+        }
+
+        return $store['data'];
     }
 
     /**

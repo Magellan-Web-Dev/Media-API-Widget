@@ -2,6 +2,8 @@
 namespace MediaApiWidget\Frontend;
 
 use MediaApiWidget\Config\Options;
+use MediaApiWidget\Support\BackupFiles;
+use MediaApiWidget\Support\MediaStore;
 use MediaApiWidget\Support\SafeRemoteRequest;
 use MediaApiWidget\Support\YoutubeGuard;
 
@@ -20,8 +22,12 @@ if (!defined('ABSPATH')) { exit; }
  * 4. Emits a second initialization `<script>` that reads the data back from
  *    localStorage and calls the front-end initialize_media() function.
  *
- * YouTube data is also persisted to a local backup JSON file so it can be
- * served on subsequent requests if the API is temporarily unavailable.
+ * This class fetches and parses; it does not persist. Every successful remote
+ * refresh hands its parsed payload to {@see MediaStore::store()}, which is the
+ * single place the `media_api_widget_data_before_store` filter fires, the
+ * transient and the local backup JSON file are written, and the
+ * `media_api_widget_data_stored` action fires. Failed and partial refreshes
+ * never reach the store, so previously good data survives intact.
  *
  * All public methods are static; this class is not intended to be instantiated.
  */
@@ -34,23 +40,15 @@ final class MediaContent
      * created with wp_mkdir_p() if it does not already exist. The returned
      * path always ends with a trailing slash.
      *
+     * Delegates to {@see BackupFiles::directory()}, which is the neutral path
+     * authority shared with {@see MediaStore} and the admin Stats page. Kept as
+     * a public wrapper because existing callers reference it by this name.
+     *
      * @return string Absolute directory path with trailing slash.
      */
     public static function backupDir(): string
     {
-        $upload = wp_upload_dir();
-        $base = rtrim($upload['basedir'] ?? WP_CONTENT_DIR . '/uploads', '/');
-        $dir = $base . '/media-api-widget/backups';
-        if (!is_dir($dir)) { wp_mkdir_p($dir); }
-
-        // Drop a silent index.php so the backup directory cannot be browsed
-        // even if the web server has directory listing enabled.
-        $index = $dir . '/index.php';
-        if (!is_file($index)) {
-            file_put_contents($index, "<?php\n// Silence is golden.\n");
-        }
-
-        return $dir . '/';
+        return BackupFiles::directory();
     }
 
     /**
@@ -241,7 +239,10 @@ final class MediaContent
                 return null;
             }
 
-            $parsedRssFeed = simplexml_load_string($rssBody);
+            // Warnings are suppressed rather than raised: a malformed third-party
+            // feed is an expected failure that returns null, not a PHP notice in
+            // the middle of wp_head.
+            $parsedRssFeed = @simplexml_load_string($rssBody);
             if (!$parsedRssFeed) {
                 return null;
             }
@@ -268,14 +269,16 @@ final class MediaContent
      * Returns the absolute backup file path for a podcast playlist.
      *
      * The file name follows the pattern `{playlistName}_podcast_backup_data.json`
-     * within the plugin's backup directory.
+     * within the plugin's backup directory. Delegates to
+     * {@see BackupFiles::filePath()} so there is one path authority shared with
+     * {@see MediaStore} and the admin Stats page.
      *
      * @param string $playlistName The playlist_name slug.
-     * @return string Absolute file path.
+     * @return string Absolute file path, or an empty string when the slug is unusable.
      */
     private static function podcastBackupFilePath(string $playlistName): string
     {
-        return self::backupDir() . $playlistName . '_podcast_backup_data.json';
+        return BackupFiles::filePath($playlistName, 'podcast');
     }
 
     /**
@@ -517,20 +520,31 @@ final class MediaContent
                 return;
             }
 
-            $state['parsedData'] = $parsedItems;
-
             // Every requested page completed normally, so this refresh may now
-            // replace the stored data.
-            $backupData = json_encode([
-                'time_stored' => time(),
-                'data' => $state['parsedData'],
-            ]);
+            // replace the stored data. MediaStore fires the pre-store filter,
+            // validates the result, and writes both the transient and the backup
+            // file; a rejection there leaves the previous good data untouched.
+            $store = MediaStore::store(
+                MediaStore::buildContext((string) $playlistName, 'youtube', MediaStore::SOURCE_REMOTE_REFRESH),
+                $parsedItems,
+                ['ttl' => $mediaCacheTtl, 'write_backup' => true]
+            );
 
-            $youtubeBackupFilePath = self::backupDir() . $playlistName . '_youtube_backup_data.json';
-            file_put_contents($youtubeBackupFilePath, $backupData);
+            // Render whatever was accepted for storage, so the current response
+            // and the stored payload can never disagree.
+            if ($store['data'] !== null) {
+                $state['parsedData'] = $store['data'];
+            }
 
-            // Set parsed data to Wordpress transient server cache
-            set_transient($type . '_' . $playlistName, $state['parsedData'], $mediaCacheTtl);
+            // A refused or incomplete store is treated exactly like a failed
+            // fetch: the error transient is left in place and the last-fetched
+            // timestamp is not stamped, so the next request retries rather than
+            // trusting a half-written refresh.
+            if (!$store['ok']) {
+                YoutubeGuard::recordGuardEvent('store_rejected', $playlistName, $fetch['pages']);
+                $state['errorLoadingData'] = true;
+                return;
+            }
 
             // Clear Youtube API Error Transient If Data Successfully Retrieved
             delete_transient($playlistName . '_youtube_error');
@@ -866,12 +880,16 @@ final class MediaContent
      *   via the iTunes API (using the numeric Apple podcast ID in media_data),
      *   then fetches and parses the RSS feed through {@see self::parseRssFeed()}.
      * - 'embed' — stores the embed URL string directly as parsedData; no RSS
-     *   fetch is performed.
-     * - 'custom' — treats media_data as a direct RSS URL, parses it, writes a
-     *   backup JSON file, and stores the result in the transient.
+     *   fetch is performed, so no extension hook fires and no backup is written.
+     * - 'custom' — treats media_data as a direct RSS URL and parses it.
      *
-     * On success, JSON-encodes parsedData and writes it to the transient for
-     * `media_cache_ttl` seconds.
+     * Every platform that actually completes a remote RSS pipeline normalizes the
+     * parsed feed to a plain array via {@see MediaStore::normalizePodcastData()}
+     * and hands it to {@see MediaStore::store()}, which fires the pre-store
+     * filter and writes both the transient (as a JSON string, the format existing
+     * readers expect) and the backup JSON file. A lookup that succeeds but whose
+     * RSS fetch or parse then fails never reaches the store, so no hook fires and
+     * no stored data is replaced.
      *
      * @param array<string,mixed> $config Resolved media config array.
      * @param array<string,mixed> &$state Mutable state. Sets 'parsedData' and 'errorLoadingData'.
@@ -885,57 +903,83 @@ final class MediaContent
         $mediaData       = $config['media_data'];
         $mediaCacheTtl   = (int) $config['media_cache_ttl'];
 
-        $getRss = null;
+        // Embed Podcast Url Without Direct RSS Feed. No API call is made, so
+        // there is no successful remote refresh to expose and the stored format
+        // stays the bare URL string existing readers already handle.
+        if ($podcastPlatform === 'embed') {
+            $state['parsedData'] = $mediaData;
+            set_transient($type . '_' . $playlistName, json_encode($mediaData), $mediaCacheTtl);
 
-        if ($podcastPlatform !== 'embed' && $podcastPlatform !== 'custom') {
-            if ($podcastPlatform === 'omny' || $podcastPlatform === 'soundcloud' || $podcastPlatform === 'buzzsprout' || $podcastPlatform === 'other') {
-                $getRss = self::trackedRemoteGet('https://itunes.apple.com/lookup?id=' . $mediaData . '&entity=podcast', [
+            return;
+        }
+
+        $isAppleRss = $podcastPlatform !== 'custom';
+
+        if ($isAppleRss) {
+            $lookup = self::trackedRemoteGet(
+                'https://itunes.apple.com/lookup?id=' . rawurlencode((string) $mediaData) . '&entity=podcast',
+                [
                     'playlist_name' => $playlistName,
                     'type' => $type,
                     'endpoint' => 'podcast_lookup',
-                ]);
-            }
+                ]
+            );
 
-            if (!$getRss && $podcastPlatform !== 'custom') {
+            if (is_wp_error($lookup) || wp_remote_retrieve_response_code($lookup) !== 200) {
                 $state['errorLoadingData'] = true;
-            } else {
-                $isAppleRss          = $podcastPlatform !== 'custom';
-                $state['parsedData'] = self::parseRssFeed($getRss, $isAppleRss, [
-                    'playlist_name' => $playlistName,
-                    'type' => $type,
-                ]);
-                if (!$state['parsedData']) {
-                    $state['errorLoadingData'] = true;
-                }
-            }
-        } else {
-            // Embed Podcast Url Without Direct RSS Feed
-            if ($podcastPlatform === 'embed') {
-                $state['parsedData'] = $mediaData;
+
+                return;
             }
 
+            // parseRssFeed() expects the iTunes JSON *body*, not the response
+            // array, and uses it to resolve the feed URL it then fetches.
+            $parsed = self::parseRssFeed((string) wp_remote_retrieve_body($lookup), true, [
+                'playlist_name' => $playlistName,
+                'type' => $type,
+            ]);
+        } else {
             // Direct RSS Feed Url
-            if ($podcastPlatform === 'custom') {
-                $state['parsedData'] = self::parseRssFeed($mediaData, false, [
-                    'playlist_name' => $playlistName,
-                    'type' => $type,
-                ]);
-                if ($state['parsedData']) {
-                    $state['parsedData']->channel->rssUrl = $mediaData;
-                    $backupData = json_encode([
-                        'time_stored' => time(),
-                        'data' => $state['parsedData'],
-                    ]);
-                    file_put_contents(self::podcastBackupFilePath($playlistName), $backupData);
-                } else {
-                    $state['errorLoadingData'] = true;
-                }
-            }
+            $parsed = self::parseRssFeed((string) $mediaData, false, [
+                'playlist_name' => $playlistName,
+                'type' => $type,
+            ]);
         }
 
-        // Set parsed data to Wordpress transient server cache
-        if (!$state['errorLoadingData']) {
-            set_transient($type . '_' . $playlistName, json_encode($state['parsedData']), $mediaCacheTtl);
+        if (!$parsed) {
+            $state['errorLoadingData'] = true;
+
+            return;
+        }
+
+        if (!$isAppleRss) {
+            $parsed->channel->rssUrl = $mediaData;
+        }
+
+        $normalized = MediaStore::normalizePodcastData($parsed);
+
+        if ($normalized === null) {
+            $state['errorLoadingData'] = true;
+
+            return;
+        }
+
+        $store = MediaStore::store(
+            MediaStore::buildContext(
+                (string) $playlistName,
+                'podcast',
+                MediaStore::SOURCE_REMOTE_REFRESH,
+                (string) $podcastPlatform
+            ),
+            $normalized,
+            ['ttl' => $mediaCacheTtl, 'write_backup' => true]
+        );
+
+        if ($store['data'] !== null) {
+            $state['parsedData'] = $store['data'];
+        }
+
+        if (!$store['ok']) {
+            $state['errorLoadingData'] = true;
         }
     }
 

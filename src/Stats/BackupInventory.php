@@ -1,7 +1,7 @@
 <?php
 namespace MediaApiWidget\Stats;
 
-use MediaApiWidget\Frontend\MediaContent;
+use MediaApiWidget\Support\BackupFiles;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -9,15 +9,18 @@ if (!defined('ABSPATH')) { exit; }
  * Read-only inventory of the local backup JSON files the plugin falls back to
  * when a fresh API call fails.
  *
- * Backup files live in {@see MediaContent::backupDir()} and are named
+ * Backup files live in {@see BackupFiles::directory()} and are named
  * `{playlist_name}_{media_type}_backup_data.json`. They are written by
- * {@see MediaContent} only after a refresh completed normally, so the
- * timestamp reported here is the moment of the last *successful* store — not
- * the moment of the last attempt.
+ * {@see \MediaApiWidget\Support\MediaStore} — reached from a remote refresh, the
+ * shortcode cache warm-up, or the stored-data updater — and only after that
+ * store completed normally, so the timestamp reported here is the moment of the
+ * last *successful* store, not the moment of the last attempt.
  *
  * This class never writes, moves, or deletes a backup file; it only resolves
- * paths and reads metadata so the admin Stats page can report on them. All
- * methods are static; this class is not intended to be instantiated.
+ * paths and reads metadata so the admin Stats page can report on them. Path
+ * resolution is delegated to {@see BackupFiles} so the storage service and this
+ * reporting layer cannot disagree about where a backup lives. All methods are
+ * static; this class is not intended to be instantiated.
  */
 final class BackupInventory
 {
@@ -27,13 +30,14 @@ final class BackupInventory
      *
      * @var array<int,string>
      */
-    public const SUPPORTED_MEDIA_TYPES = ['youtube', 'podcast'];
+    public const SUPPORTED_MEDIA_TYPES = BackupFiles::SUPPORTED_MEDIA_TYPES;
 
     /**
      * How many leading bytes of a backup file are read when looking for the
      * `time_stored` key. The key is always written first by
-     * {@see MediaContent}, so a short prefix read avoids decoding a playlist
-     * that may be hundreds of kilobytes just to read one integer.
+     * {@see \MediaApiWidget\Support\MediaStore}, so a short prefix read avoids
+     * decoding a playlist that may be hundreds of kilobytes just to read one
+     * integer.
      *
      * @var int
      */
@@ -52,14 +56,14 @@ final class BackupInventory
     /**
      * Returns the absolute backup directory path, with a trailing slash.
      *
-     * Delegates to {@see MediaContent::backupDir()} so there is a single
+     * Delegates to {@see BackupFiles::directory()} so there is a single
      * source of truth for where backups live.
      *
      * @return string Absolute directory path ending in a slash.
      */
     public static function directory(): string
     {
-        return MediaContent::backupDir();
+        return BackupFiles::directory();
     }
 
     /**
@@ -70,16 +74,16 @@ final class BackupInventory
      */
     public static function isSupportedMediaType(string $mediaType): bool
     {
-        return in_array($mediaType, self::SUPPORTED_MEDIA_TYPES, true);
+        return BackupFiles::isSupportedMediaType($mediaType);
     }
 
     /**
      * Returns the backup file name for a playlist and media type.
      *
-     * The playlist slug is passed through sanitize_key(), matching how it is
-     * stored by both the settings page and {@see ApiCallLogger}, so a name
-     * coming back out of the log table resolves to the same file that
-     * {@see MediaContent} wrote.
+     * Delegates to {@see BackupFiles::fileName()}, which passes the playlist
+     * slug through sanitize_key() exactly as the settings page and
+     * {@see ApiCallLogger} do, so a name coming back out of the log table
+     * resolves to the same file the storage service wrote.
      *
      * @param string $playlistName The playlist_name slug.
      * @param string $mediaType    'youtube' or 'podcast'.
@@ -87,14 +91,7 @@ final class BackupInventory
      */
     public static function fileName(string $playlistName, string $mediaType): string
     {
-        $playlistName = sanitize_key($playlistName);
-        $mediaType    = sanitize_key($mediaType);
-
-        if ($playlistName === '' || !self::isSupportedMediaType($mediaType)) {
-            return '';
-        }
-
-        return $playlistName . '_' . $mediaType . '_backup_data.json';
+        return BackupFiles::fileName($playlistName, $mediaType);
     }
 
     /**

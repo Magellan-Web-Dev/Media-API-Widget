@@ -278,3 +278,145 @@ function maw_backup_path(string $playlistName): string
 {
     return MediaApiWidget\Frontend\MediaContent::backupDir() . $playlistName . '_youtube_backup_data.json';
 }
+
+/**
+ * Returns the absolute backup file path for a podcast playlist.
+ *
+ * @param string $playlistName Playlist slug.
+ * @return string Absolute path.
+ */
+function maw_podcast_backup_path(string $playlistName): string
+{
+    return MediaApiWidget\Frontend\MediaContent::backupDir() . $playlistName . '_podcast_backup_data.json';
+}
+
+/**
+ * Invokes Shortcode's private podcast cache warm-up path.
+ *
+ * Driven directly rather than through the shortcode entry points, which would
+ * pull in a dozen further WordPress functions (shortcode_atts, home_url,
+ * esc_url, sanitize_text_field, …) that this suite deliberately does not stub.
+ *
+ * @param string              $playlistName Playlist slug.
+ * @param array<string,mixed> $mediaConfig  Admin media config for the playlist.
+ * @return array<string,mixed>|null Stored podcast data, or null on failure.
+ */
+function maw_run_podcast_warmup(string $playlistName, array $mediaConfig): ?array
+{
+    $shortcode = new MediaApiWidget\Frontend\Shortcode();
+
+    $invoke = Closure::bind(
+        static function (
+            MediaApiWidget\Frontend\Shortcode $shortcode,
+            string $playlistName,
+            array $mediaConfig
+        ): ?array {
+            return $shortcode->fetchPodcastDataAndWarmCache($playlistName, $mediaConfig);
+        },
+        null,
+        MediaApiWidget\Frontend\Shortcode::class
+    );
+
+    return $invoke($shortcode, $playlistName, $mediaConfig);
+}
+
+/**
+ * Runs the full wp_head media pipeline, capturing the emitted scripts.
+ *
+ * Needed for cases about the transient-hit path: the loader helpers above call
+ * loadYoutubeData()/loadPodcastData() directly, which is *past* the transient
+ * check, so only the public entry point can prove a cache hit skips the store.
+ *
+ * @param array<string,mixed> $config Media config array.
+ * @return string Everything echoed into wp_head.
+ */
+function maw_run_media_content(array $config): string
+{
+    ob_start();
+    MediaApiWidget\Frontend\MediaContent::getMediaContent($config);
+
+    return (string) ob_get_clean();
+}
+
+/**
+ * Registers a hook callback for the duration of one test.
+ *
+ * Defaults to two accepted arguments because every hook in the extension API
+ * passes a payload and a context array.
+ *
+ * @param string   $tag          Hook name.
+ * @param callable $callback     Callback to register.
+ * @param int      $acceptedArgs How many arguments the callback wants.
+ * @return void
+ */
+function maw_on(string $tag, callable $callback, int $acceptedArgs = 2): void
+{
+    add_filter($tag, $callback, 10, $acceptedArgs);
+}
+
+/**
+ * Returns every recorded invocation of one hook, in order.
+ *
+ * @param string $tag Hook name.
+ * @return array<int,array{tag:string,args:array<int,mixed>}> Matching invocations.
+ */
+function maw_hook_calls(string $tag): array
+{
+    return array_values(array_filter(
+        MawTestState::$hookCalls,
+        static fn (array $call): bool => $call['tag'] === $tag
+    ));
+}
+
+/**
+ * Returns how many times one hook fired.
+ *
+ * @param string $tag Hook name.
+ * @return int Invocation count.
+ */
+function maw_hook_count(string $tag): int
+{
+    return count(maw_hook_calls($tag));
+}
+
+/**
+ * Returns the arguments of one recorded hook invocation.
+ *
+ * @param string $tag   Hook name.
+ * @param int    $index Zero-based invocation index.
+ * @return array<int,mixed> Arguments, or an empty array when absent.
+ */
+function maw_hook_args(string $tag, int $index = 0): array
+{
+    $calls = maw_hook_calls($tag);
+
+    return $calls[$index]['args'] ?? [];
+}
+
+/**
+ * Makes the backup directory unwritable so a backup write fails for real.
+ *
+ * Used instead of a mock flag inside the storage code, so the partial-persist
+ * path is exercised through a genuine filesystem failure. Any existing backup
+ * file stays present and readable, which is the state the assertions check.
+ *
+ * @return string The backup directory path, for restoring afterwards.
+ */
+function maw_lock_backup_dir(): string
+{
+    $dir = MediaApiWidget\Support\BackupFiles::directory();
+    chmod($dir, 0555);
+
+    return $dir;
+}
+
+/**
+ * Restores write access to the backup directory.
+ *
+ * @param string $dir Path returned by {@see maw_lock_backup_dir()}.
+ * @return void
+ */
+function maw_unlock_backup_dir(string $dir): void
+{
+    chmod($dir, 0777);
+}

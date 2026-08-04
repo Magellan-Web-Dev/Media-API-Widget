@@ -32,7 +32,12 @@ A WordPress plugin that syncs YouTube playlists and podcast RSS feeds to the fro
 12. [Podcast Player (`/podcast/player`)](#podcast-player-podcastplayer)
 13. [API Statistics](#api-statistics)
 14. [JavaScript Events](#javascript-events)
-15. [Backward Compatibility](#backward-compatibility)
+15. [Developer Hooks / Data Enrichment](#developer-hooks--data-enrichment)
+    - [`media_api_widget_data_before_store` (filter)](#media_api_widget_data_before_store-filter)
+    - [`media_api_widget_data_stored` (action)](#media_api_widget_data_stored-action)
+    - [`media_api_widget_update_stored_data()`](#media_api_widget_update_stored_data)
+    - [Recommended asynchronous transcription workflow](#recommended-asynchronous-transcription-workflow)
+16. [Backward Compatibility](#backward-compatibility)
 
 ---
 
@@ -157,7 +162,7 @@ The **By Playlist and Endpoint** table also reports on the local backup each pla
 | **Last Successful Backup** | When the playlist's backup JSON was last stored successfully, in the site timezone. Reads the `time_stored` value written inside the file, falling back to the file's modification time for older files. Shows *No backup stored* when no file exists yet. |
 | **Backup File** | A **Download** link that streams the backup JSON file directly, with its size beside it. Shows an em dash when there is no file to download. |
 
-Because a backup is only written after a refresh completes every requested page, the timestamp is the last *successful* store rather than the last attempt — a failed or partial refresh leaves the previous good backup, and its timestamp, untouched. YouTube playlists always have a backup once one refresh has succeeded; podcast backups exist for direct RSS feeds, while Apple-lookup and embed platforms have no backup file.
+Because a backup is only written after a refresh completes every requested page, the timestamp is the last *successful* store rather than the last attempt — a failed or partial refresh leaves the previous good backup, and its timestamp, untouched. YouTube playlists always have a backup once one refresh has succeeded. As of 5.0.0 every podcast platform that fetches an RSS feed has one too — direct RSS feeds and Apple-lookup platforms alike, including those warmed by a shortcode. Only embed platforms have no backup file, because they make no API call and store just the embed URL.
 
 Downloads are served through `admin-post.php` rather than a direct uploads URL, so every request is checked for the `manage_options` capability and a valid nonce, and the file path is resolved and confirmed to be inside the backup directory before anything is sent. The files are only ever read — nothing on the page can write, replace, or delete a backup.
 
@@ -600,6 +605,7 @@ The runner exits non-zero if any assertion fails. Groups live in `tests/cases/`:
 | `options` | The new defaults, and that installs saved before the guard settings existed receive them at read time without the stored option being rewritten. |
 | `podcast` | That podcast, Apple/iTunes, and embed paths consume no YouTube budget, take no YouTube lock, and still work when the YouTube budget is exhausted. |
 | `backup-inventory` | That the API Stats backup columns resolve the same file the media pipeline writes, report `time_stored` (falling back to the file time), keep YouTube and podcast backups separate, and report nothing for a missing file, an unsupported media type, or an empty slug. |
+| `extension-api` | That the pre-store filter fires exactly once per complete successful refresh and never for a cache hit, backup read, partial refresh, failed request, unparseable feed, Apple lookup without a successful RSS fetch, or embed-only podcast; that the filtered value is written identically to the transient and backup and is what the current response renders; that a `WP_Error`, wrong shape, or unencodable return leaves the old data byte-for-byte intact; that the shortcode warm-up path cannot bypass the hooks; that the stored action is post-commit; that the global updater changes YouTube and podcast data with no external request while preserving custom item keys and storage formats; and that every lock is released on success, error, and thrown exception. |
 
 ---
 
@@ -724,6 +730,229 @@ document.addEventListener("mediaApiWidgetItemClick", (e) => {
 
 ---
 
+## Developer Hooks / Data Enrichment
+
+Two PHP hooks and two global functions let other code alter the playlist data this plugin stores. They exist for asynchronous enrichment — attaching transcript status, custom metadata, or anything else derived from an episode — without forking the plugin or re-fetching from the API.
+
+All four are stable public API. The classes behind them are internal.
+
+### `media_api_widget_data_before_store` (filter)
+
+Alters successfully fetched and parsed media data immediately before it is written to server storage.
+
+```php
+$data = apply_filters(
+    'media_api_widget_data_before_store',
+    $data,
+    $context
+);
+```
+
+**Fires:** exactly once per complete, successful logical remote refresh, after everything has been fetched and parsed but before anything is written. For a paginated YouTube playlist it fires **once for the whole playlist**, after every page has completed — not once per page.
+
+**Never fires for:** a transient cache hit; a backup file read (including the YouTube backup-window short-circuit); a partial refresh (page ceiling reached, repeated page token, daily call limit reached); a malformed API response; an HTTP or transport failure; a request blocked by the concurrency lock; a podcast RSS feed that fails to fetch or parse; an Apple/iTunes lookup that succeeds but whose RSS fetch or parse then fails; or an embed-only podcast, which makes no API call at all.
+
+**The returned value is what gets stored** and what the current page render uses, so the response and the stored payload can never disagree.
+
+**Return value is validated.** If the filter returns a `WP_Error`, a value that does not match the documented shape for that media type, or a value that cannot be JSON encoded, the refresh is treated as **failed**: nothing is written, the previous transient and backup file are left byte-for-byte intact, and a `store_rejected` guard event is recorded for the administrator on the [Caching](#caching) page. A callback that throws is contained the same way rather than taking the page down.
+
+### `media_api_widget_data_stored` (action)
+
+Fires after media data has been written successfully.
+
+```php
+do_action(
+    'media_api_widget_data_stored',
+    $data,
+    $context
+);
+```
+
+**Fires:** only after the storage write has completed. It does not fire for any rejected store, and it does not fire when the transient was written but the backup file write failed — that case is reported as a failure and retried, so firing would hand you the same payload twice.
+
+**Callbacks run synchronously**, inside the request that performed the refresh — which for the front-end pipeline means inside `wp_head` on a visitor's page view. Do not call a transcription API, or anything else slow, directly from a callback. Enqueue background work instead.
+
+**This action is post-commit.** The data is already stored by the time it fires, so a callback that throws is logged and discarded; it cannot turn a completed store into a reported failure or prevent the refresh from finalizing.
+
+### `$context` (both hooks)
+
+| Key | Type | Description |
+|---|---|---|
+| `playlist_name` | `string` | The `playlist_name` slug of the media item. |
+| `media_type` | `string` | `youtube` or `podcast`. |
+| `source` | `string` | `remote_refresh`, `shortcode_warmup`, or `manual_update` — see below. |
+| `podcast_platform` | `string\|null` | The podcast platform slug (`custom`, `omny`, `soundcloud`, `buzzsprout`, `other`). `null` for YouTube. |
+
+| `source` | Meaning |
+|---|---|
+| `remote_refresh` | A refresh performed by the front-end `wp_head` pipeline. |
+| `shortcode_warmup` | A podcast cache warm-up performed because a shortcode rendered before the cache was populated. |
+| `manual_update` | A write made by `media_api_widget_update_stored_data()`. |
+
+No API key, credential, request URL, or response body is ever placed in the context.
+
+### `media_api_widget_update_stored_data()`
+
+Alters data that has **already** been stored, without making any API request.
+
+```php
+media_api_widget_update_stored_data(
+    string $playlistName,
+    string $mediaType,
+    callable $mutator
+);
+```
+
+The mutator receives the current decoded data and the same context array the hooks get:
+
+```php
+function ($data, array $context) {
+    // Return altered data or WP_Error.
+    return $data;
+}
+```
+
+Returns the updated decoded data on success, and a `WP_Error` on failure.
+
+- Accepts only `youtube` and `podcast`. The playlist name is sanitized and validated.
+- Reads the current canonical data from the transient, falling back to the applicable backup file. **Never makes an external request.**
+- Runs the mutator while holding the playlist's storage lock (`maw_media_data_lock_{media_type}_{playlist_name}`), so a remote refresh cannot land between the read and the write. The lock is released on success, on error, on `WP_Error`, and on a thrown exception.
+- Writes the result to the transient **and** the applicable backup file, using the configured [media cache TTL](#caching), and refreshes the backup's `time_stored` value. The backup is replaced by an atomic rename, so a failed write cannot corrupt the previous one.
+- Validates the mutator's return value exactly as the pre-store filter's is validated. On any validation or persistence failure, the existing data is retained.
+- Fires `media_api_widget_data_stored` with `source => 'manual_update'` on success. It deliberately does **not** fire `media_api_widget_data_before_store`, so an enrichment write cannot loop back into itself.
+
+**Error codes:** `maw_unsupported_media_type`, `maw_invalid_playlist_name`, `maw_data_locked`, `maw_no_stored_data`, `maw_unsupported_podcast_payload` (an embed-only podcast has no episode structure to enrich), `maw_mutator_threw`, `maw_invalid_youtube_data`, `maw_invalid_podcast_data`, `maw_json_encode_failed`, `maw_transient_write_failed`, `maw_backup_write_failed`.
+
+### `media_api_widget_get_stored_data()`
+
+Reads the currently stored data without refreshing it.
+
+```php
+media_api_widget_get_stored_data(string $playlistName, string $mediaType);
+```
+
+Prefers the transient and falls back to the backup file — the same precedence the front end uses. Makes no external request, so it is safe from WP-Cron, Action Scheduler, WP-CLI, or a REST callback. Returns `null` when nothing usable is stored.
+
+### Data shapes
+
+**YouTube** — an indexed list (`array_is_list()`) of media item arrays. Each item carries at least `title`, `id` (the YouTube video ID), `episode`, `thumbnail`, `publishedDate`, and `description`. An empty list is valid.
+
+**Podcast** — the parsed RSS feed normalized to a plain nested PHP array (a `SimpleXMLElement` round-tripped through JSON), so callbacks can read and modify it with ordinary array syntax:
+
+```
+[
+    'channel' => [
+        'title'             => 'My Show',
+        'rssUrl'            => 'https://example.com/feed.xml',
+        'collectionViewUrl' => 'https://podcasts.apple.com/…',
+        'item'              => [
+            ['title' => '…', 'description' => '…', 'guid' => '…', 'pubDate' => '…'],
+            …
+        ],
+    ],
+]
+```
+
+`channel.item` is an **associative array rather than a list** for a single-episode feed, and may be absent for a feed with no episodes — handle both. Embed-only podcasts store a bare URL string and are excluded from these hooks entirely.
+
+Arbitrary custom keys you add to individual items are preserved; only the container shape is validated.
+
+Storage formats are unchanged from earlier versions: the YouTube transient holds a PHP array, the podcast transient holds a JSON string, and backup files hold a `{"time_stored": …, "data": …}` wrapper.
+
+### Example — mark every item pending as it is stored
+
+```php
+add_filter(
+    'media_api_widget_data_before_store',
+    static function ($data, array $context) {
+        if (
+            $context['media_type'] !== 'youtube'
+            || $context['playlist_name'] !== 'my_show'
+        ) {
+            return $data;
+        }
+
+        foreach ($data as &$item) {
+            $item['transcript_status'] = 'pending';
+        }
+        unset($item);
+
+        return $data;
+    },
+    10,
+    2
+);
+```
+
+### Example — record a finished transcript
+
+```php
+$result = media_api_widget_update_stored_data(
+    'my_show',
+    'youtube',
+    static function ($data, array $context) {
+        foreach ($data as &$item) {
+            if (($item['id'] ?? '') === 'YOUTUBE_VIDEO_ID') {
+                $item['transcript_status'] = 'complete';
+                $item['transcript_url'] = 'https://example.com/transcripts/YOUTUBE_VIDEO_ID';
+            }
+        }
+        unset($item);
+
+        return $data;
+    }
+);
+
+if (is_wp_error($result)) {
+    // Nothing was written; the previous good data is intact.
+}
+```
+
+### Recommended asynchronous transcription workflow
+
+This plugin does not integrate with any transcription provider and adds no third-party dependency. The supported pattern is:
+
+1. Hook `media_api_widget_data_stored`.
+2. **Ignore events whose `source` is not `remote_refresh` or `shortcode_warmup`.** This is what prevents a loop: your own writes arrive as `manual_update`, and acting on them would trigger another write.
+3. Enqueue a WP-Cron event or an Action Scheduler job. Do not call the provider from the callback.
+4. Identify YouTube episodes by video ID (`$item['id']`) and podcast episodes by GUID (`$item['guid']`).
+5. Call the transcription service asynchronously from that background job.
+6. When the result is ready, write it back with `media_api_widget_update_stored_data()`.
+
+```php
+add_action(
+    'media_api_widget_data_stored',
+    static function ($data, array $context): void {
+        // Only react to fresh remote data; skip our own manual updates.
+        if (!in_array($context['source'], ['remote_refresh', 'shortcode_warmup'], true)) {
+            return;
+        }
+
+        wp_schedule_single_event(
+            time() + 60,
+            'my_plugin_queue_transcripts',
+            [$context['playlist_name'], $context['media_type']]
+        );
+    },
+    10,
+    2
+);
+```
+
+Note that a remote refresh **replaces** the stored payload with whatever the API returned, so fields a `manual_update` added are not present in the next refresh's data. The storage lock prevents the two writers from interleaving or leaving the transient and backup disagreeing; it does not merge them. Re-apply derived fields in `media_api_widget_data_before_store`, which runs on every refresh, and keep the authoritative record in your own storage.
+
+### Do not store full transcripts in the playlist payload
+
+**Full transcripts can be very large, and this payload is not a private server-side cache.** The plugin embeds playlist data directly into page output and copies it into the browser's `localStorage` (see [Caching Architecture](#caching-architecture)). A few hundred kilobytes of transcript text per episode becomes a few hundred kilobytes on every page load, for every visitor.
+
+Store full transcripts separately — a custom table, a custom post type, post meta, or object storage — and attach only a small reference to the playlist item: a status, a short excerpt, a database key, a REST URL, or a transcript URL.
+
+### Browser cache propagation
+
+A server-side update changes the transient and the backup file. It cannot reach into a visitor's browser. Clients that already have a payload in `localStorage` keep serving it until the normal media cache and cookie refresh cycle expires, which is governed by the **Media cache transient** setting on the [Caching](#caching) page. There is no mechanism — in this plugin or in WordPress — to delete cookies or `localStorage` from every visitor's browser from the server. Plan for enrichment to appear progressively as clients refresh, not instantly.
+
+---
+
 ## Backward Compatibility
 
 - The plugin merges any `MEDIA_CONTENT_DATA` constant (defined by WPCode or a theme) with admin-configured media items, so legacy setups continue to work without changes.
@@ -732,3 +961,10 @@ document.addEventListener("mediaApiWidgetItemClick", (e) => {
 - The two guard settings added in 4.8.0 are read from the existing `maw_cache_expirations` option. Installs that predate them receive the defaults at read time — no resave is required, no existing option name or value changes, and reading the settings does not rewrite what is stored.
 - The backup columns added to the API Stats page in 4.9.0 are purely read-only reporting over the backup files the plugin already wrote. No file name, location, or write rule changed, no new option or database column was introduced, and installs with backups predating the `time_stored` key still report a timestamp via the file modification time.
 - The pagination change in 4.10.0 only widens what counts as a successful refresh: an empty tail page reached after items have been collected now ends pagination normally instead of aborting. No setting, option, transient name, backup file format, or guard reason code changed, and a healthy playlist produces byte-identical output. Playlists that were failing every refresh on this shape begin succeeding on their next refresh with no intervention; the `empty_page_with_next_token` guard reason is still recorded when the very first page returns no items.
+- The [Developer Hooks](#developer-hooks--data-enrichment) added in 5.0.0 are additive: a site with no callbacks registered behaves exactly as before. No setting, option name, transient name, cache key, or backup file name changed. The YouTube transient still holds a PHP array, the podcast transient still holds a JSON string, and backup files still hold the `{"time_stored": …, "data": …}` wrapper. Five behaviors did change, all of them fixes:
+  - **Apple/iTunes podcasts now work in the `wp_head` pipeline.** `omny`, `soundcloud`, `buzzsprout`, and `other` previously threw a `TypeError` there, because the raw HTTP response was passed where the response body was expected. These playlists were already being served correctly by the shortcode path, so most sites will see no visible difference beyond the error going away.
+  - **Every RSS-fetching podcast platform now writes a backup file**, not just `custom`. This makes the existing local-fallback and API Stats backup reporting meaningful for Apple-lookup playlists. Nothing needs to be done; the file appears on the next refresh.
+  - **The shortcode podcast cache warm-up honors the configured Media cache transient TTL** instead of a hardcoded 2 hours, and writes a backup file. If your TTL is set to something other than 7200 seconds, warmed podcast caches now respect it.
+  - **Podcast data is normalized to a plain PHP array before being stored.** The stored transient is still a JSON string and every reader in the plugin already decoded it to an array, so this is not a format change. One serialization detail differs: an empty XML element now serializes as `[]` rather than `{}`, which is what the shortcode path already produced and what the front-end JavaScript handles better.
+  - **A refresh whose data is refused now records a `store_rejected` guard event** on the Caching page. This is a new value in an existing reason list; unknown reasons were already displayed generically.
+- The internal `MediaContent::backupDir()` and `BackupInventory` path methods still exist and still return the same paths in 5.0.0; they now delegate to a shared `Support\BackupFiles` class so the storage service, the fetch pipeline, and the Stats page cannot disagree about where a backup lives.
