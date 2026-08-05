@@ -702,6 +702,7 @@
                         } else { 
                             lightboxArrowRight.classList.remove(`disable-arrow`);
                             lightboxStartingRight.classList.add(`frame-transitioning-right`);
+                            // Preload adjacent carousel videos without playing them.
                             lightboxStartingRight.querySelector(`iframe`).src = lightboxFrameVideoBaseUrl + setVideoId(1);
 	                            lightboxStartingRight.querySelector(`h1`).textContent = setThumbnailText(setData(1));
                         }
@@ -718,9 +719,9 @@
 
                         if (playListSorted[currentVideoIndex]) {
                         if (window.innerWidth > mediaQueryMobileBreakpoint || showPlaylist) {
-                            startingLightboxActive.querySelector(`iframe`).src = lightboxFrameVideoBaseUrl + setVideoId(0);
+                            startingLightboxActive.querySelector(`iframe`).src = lightboxFrameVideoBaseUrl + setVideoId(0) + `?autoplay=1`;
 	                            startingLightboxActive.querySelector(`h1`).textContent = setThumbnailText(setData(0));
-                        } else window.open(lightboxFrameVideoBaseUrl + setVideoId(0))
+                        } else window.open(lightboxFrameVideoBaseUrl + setVideoId(0) + `?autoplay=1`);
                         }
                         if (window.innerWidth > mediaQueryMobileBreakpoint || showPlaylist) {
                             lightbox.classList.add(`show-lightbox`);
@@ -822,6 +823,12 @@
                     // Left Arrow Click/Mousedown And Auto Transitioning
 
                     function advanceLightboxLeft(fastForward) {
+                        // Unload the outgoing player before the preloaded left
+                        // frame becomes the sole autoplaying frame.
+                        const activeIframe = lightbox.querySelector(`[data-frameposition="0"] iframe`);
+                        if (activeIframe) {
+                            activeIframe.src = ``;
+                        }
                         currentVideoIndex -= 1;
 
                         if (playListSorted[currentVideoIndex - 1]) {
@@ -850,6 +857,12 @@
                     // Right Arrow Click/Mousedown And Auto Transitioning
 
                     function advanceLightboxRight(fastForward) {
+                        // Hidden iframes keep playing audio, so stop the outgoing
+                        // frame before promoting the next one.
+                        const activeIframe = lightbox.querySelector(`[data-frameposition="0"] iframe`);
+                        if (activeIframe) {
+                            activeIframe.src = ``;
+                        }
                         currentVideoIndex += 1;
 
                         if (playListSorted[currentVideoIndex + 1]) {
@@ -1011,6 +1024,8 @@
 
                     const iframe = frame.querySelector(`iframe`);
                     const iframeText = frame.querySelector(`h1`);
+                    // Arrow navigation loads the newly active video paused. Only
+                    // the item that originally opened the lightbox autoplays.
                     const currentIframeUrl = currentFrameData ? lightboxFrameVideoBaseUrl + currentFrameData.id : null;
                     const nextIframeUrl = nextFrameData ? lightboxFrameVideoBaseUrl + nextFrameData.id : null;
                     const previousIframeUrl = previousFrameData ? lightboxFrameVideoBaseUrl + previousFrameData.id : null;
@@ -1218,6 +1233,7 @@
                         params.set("font", ds.podcastplayerfont || "");
                         params.set("scrollcolor", ds.podcastplayerscrollcolor || "");
                         params.set("textcolor", ds.podcastplayertextcolor || "");
+                        params.set("autoplay", "1");
                         if (ds.showepisodedateaftertitle === "true") {
                             params.set("adddatetotitle", "true");
                         }
@@ -1230,13 +1246,13 @@
                         if (podcast_platform === "omny") {
                             const { channel } = media_data;
                             const showName = channel.item[0].link.split("/")[4];
-                            return `https://omny.fm/shows/${showName}/playlists/podcast/embed?selectedClip=${itemClicked.dataset.id}`;
+                            return `https://omny.fm/shows/${showName}/playlists/podcast/embed?selectedClip=${itemClicked.dataset.id}&autoplay=1`;
                         }
                         if (podcast_platform === "soundcloud") {
                             const showEpisodeUrl = media_data.channel.item[0].link;
                             const spliced = showEpisodeUrl.split("/");
                             const urlOutput = `${spliced[0]}/${spliced[1]}/${spliced[2]}/${spliced[3]}`;
-                            return `https://w.soundcloud.com/player/?url=${urlOutput}&start_track=${itemClicked.dataset.trackselect}`;
+                            return `https://w.soundcloud.com/player/?url=${urlOutput}&start_track=${itemClicked.dataset.trackselect}&auto_play=true`;
                         }
                         if (podcast_platform === "buzzsprout") {
                             const { channel } = media_data;
@@ -1279,14 +1295,14 @@
 
                             const showName = channel.item[0].link.split("/")[4];
 
-                            embedPlayerUrl = `https://omny.fm/shows/${showName}/playlists/podcast/embed?selectedClip=${itemClicked.dataset.id}`;
+                            embedPlayerUrl = `https://omny.fm/shows/${showName}/playlists/podcast/embed?selectedClip=${itemClicked.dataset.id}&autoplay=1`;
                         }
 
                         if (podcast_platform === "soundcloud") {
                             const showEpisodeUrl = media_data.channel.item[0].link;
                             const spliced = showEpisodeUrl.split("/");
                             const urlOutput = `${spliced[0]}/${spliced[1]}/${spliced[2]}/${spliced[3]}`;
-                            embedPlayerUrl = `https://w.soundcloud.com/player/?url=${urlOutput}&start_track=${itemClicked.dataset.trackselect}`;
+                            embedPlayerUrl = `https://w.soundcloud.com/player/?url=${urlOutput}&start_track=${itemClicked.dataset.trackselect}&auto_play=true`;
                         }
 
                         if (podcast_platform === "buzzsprout") {
@@ -1336,6 +1352,7 @@
 
                         const embedIframe = document.createElement("iframe");
                         embedIframe.className = "lightbox-podcast-embed-player";
+                        embedIframe.setAttribute("allow", "autoplay");
                         embedIframe.src = embedPlayerUrl;
 
                         boxFrame.appendChild(embedIframe);

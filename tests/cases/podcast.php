@@ -9,6 +9,7 @@
 
 declare(strict_types=1);
 
+use MediaApiWidget\PodcastPlayer\DataParams;
 use MediaApiWidget\Support\YoutubeGuard;
 
 /**
@@ -141,5 +142,45 @@ return [
         maw_assert_same(true, $state['errorLoadingData'], 'the podcast failure is reported');
         maw_assert_same(null, YoutubeGuard::getGuardStatus(), 'no YouTube guard event is recorded');
         maw_assert_same(0, YoutubeGuard::getDailyCallCount(), 'the YouTube daily counter stays at zero');
+    },
+
+    'the custom podcast player accepts an explicit autoplay flag' => static function (): void {
+        $previousRequestUri = $_SERVER['REQUEST_URI'] ?? null;
+
+        try {
+            $_SERVER['REQUEST_URI'] = '/podcast/player?url=' . rawurlencode('https://feeds.example.com/podcast.xml') . '&autoplay=1';
+            maw_queue_raw(maw_podcast_rss());
+
+            $params = (new DataParams())->build();
+
+            maw_assert_same(false, $params['error_loading_rss'], 'the podcast player data loads');
+            maw_assert_same(true, $params['autoplay'], 'autoplay=1 enables autoplay');
+        } finally {
+            if ($previousRequestUri === null) {
+                unset($_SERVER['REQUEST_URI']);
+            } else {
+                $_SERVER['REQUEST_URI'] = $previousRequestUri;
+            }
+        }
+    },
+
+    'the custom podcast player stays paused when autoplay is omitted' => static function (): void {
+        $previousRequestUri = $_SERVER['REQUEST_URI'] ?? null;
+
+        try {
+            $_SERVER['REQUEST_URI'] = '/podcast/player?url=' . rawurlencode('https://feeds.example.com/podcast.xml');
+            maw_queue_raw(maw_podcast_rss());
+
+            $params = (new DataParams())->build();
+
+            maw_assert_same(false, $params['error_loading_rss'], 'the podcast player data loads');
+            maw_assert_same(false, $params['autoplay'], 'the existing paused default is preserved');
+        } finally {
+            if ($previousRequestUri === null) {
+                unset($_SERVER['REQUEST_URI']);
+            } else {
+                $_SERVER['REQUEST_URI'] = $previousRequestUri;
+            }
+        }
     },
 ];

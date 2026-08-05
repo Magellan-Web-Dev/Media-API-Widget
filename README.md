@@ -193,6 +193,8 @@ Outputs: `All-new episodes every Tuesday`
 
 Renders a clickable media thumbnail. Clicking it opens a lightbox with the YouTube video player or podcast audio player.
 
+The YouTube video whose media item opens the lightbox autoplays. Neighboring carousel videos remain paused, including after they are selected with the navigation arrows. Podcast lightboxes request autoplay for the built-in custom player, Omny, and SoundCloud. Browser autoplay preferences can still block audible playback, Buzzsprout does not support autoplay, and arbitrary `embed` platform URLs retain their provider-defined behavior. Inline `[media-api-podcast-player]` embeds remain paused by default.
+
 Also available as the alias `[media-api-widget-item]`.
 
 **Minimal example (YouTube):**

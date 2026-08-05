@@ -122,6 +122,7 @@ $base_url = MAW_PLUGIN_URL . 'assets/podcast-player';
             const startingEpisodeId = "<?= esc_js((string) $starting_episode_id); ?>";
             const rssData = <?= $rss_data ?: 'null'; ?>;
             const fullPlayer = "<?= esc_js((string) $single_episode); ?>" === "false";
+            const autoplayEnabled = <?= $autoplay ? 'true' : 'false'; ?>;
         </script>
         <script src="<?= esc_url($base_url); ?>/scripts/rss_data.js"></script>
         <script src="<?= esc_url($base_url); ?>/scripts/element_selectors.js"></script>

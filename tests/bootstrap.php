@@ -676,6 +676,15 @@ function sanitize_key(string $key): string
 }
 
 /**
+ * @param string $text Raw text.
+ * @return string Sanitized single-line text.
+ */
+function sanitize_text_field(string $text): string
+{
+    return trim(strip_tags((string) preg_replace('/[\r\n\t ]+/', ' ', $text)));
+}
+
+/**
  * @param mixed $value Raw value.
  * @return int Non-negative integer.
  */

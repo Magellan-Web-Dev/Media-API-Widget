@@ -66,13 +66,21 @@ function togglePlay(starting) {
         playing = !playing;
     }
     if (playing) {
-        audio.play().then(() => {
+        const playRequest = audio.play();
+        Promise.resolve(playRequest).then(() => {
             playButtonIcon.classList.add("playing-active");
+            clearInterval(playCounter);
+            playCounter = setInterval(() => {
+                progressFiller.style.right = progressBarTimeCalc();
+                setCurrentPlayTime();
+            }, 250);
+        }).catch(() => {
+            // Browsers may reject audible autoplay despite a user opening the
+            // lightbox. Leave the player paused and ready for a manual click.
+            playing = false;
+            playButtonIcon.classList.remove("playing-active");
+            clearInterval(playCounter);
         });
-        playCounter = setInterval(() => {
-            progressFiller.style.right = progressBarTimeCalc();
-            setCurrentPlayTime();
-        }, 250);
     } else {
         playButtonIcon.classList.remove("playing-active");
         audio.pause();
@@ -286,7 +294,11 @@ function setTotalEpisodeTime(item, event) {
 
             episodeDescription.style.left = '0px';
 
-            togglePlay(event === 'init' ? false : true);
+            if (event === 'init') {
+                togglePlay(autoplayEnabled);
+            } else {
+                togglePlay(true);
+            }
             
             initDescriptionScrollText();
         });

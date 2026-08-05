@@ -37,6 +37,7 @@ final class DataParams
      * - font             — Google Fonts font name.
      * - adddatetotitle   — if present, the publish date is appended to each title.
      * - singleepisode    — GUID string; hides the episode list and jumps to that GUID.
+     * - autoplay         — starts playback when set to a truthy value.
      *
      * On error (missing URL, unreachable feed, unparseable XML, or an
      * out-of-range track), error_loading_rss is set to true and err_msg
@@ -50,6 +51,7 @@ final class DataParams
      *   - int                        $track_selected     0-based index of the starting episode.
      *   - string                     $single_episode     GUID of a single episode, or 'false'.
      *   - string|null                $add_date_to_title  Non-null when date appending is on.
+     *   - bool                       $autoplay           Whether playback should start on load.
      *   - \SimpleXMLElement|null     $parsed_rss_feed    The full parsed RSS document.
      *   - \SimpleXMLElement|null     $channel            The channel element of the feed.
      *   - \SimpleXMLElement|null     $episodes           All episode item elements.
@@ -95,6 +97,7 @@ final class DataParams
 
         $singleEpisode  = ($params['singleepisode'] ?? null) !== null ? (string) $params['singleepisode'] : 'false';
         $addDateToTitle = $params['adddatetotitle'] ?? null;
+        $autoplay       = filter_var($params['autoplay'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         if (!$rssUrl) {
             $errMsg = 'An RSS url parameter must be provided in order to retrieve a podcast.';
@@ -218,6 +221,7 @@ final class DataParams
             'track_selected'     => $trackSelected,
             'single_episode'     => $singleEpisode,
             'add_date_to_title'  => $addDateToTitle,
+            'autoplay'           => $autoplay,
             'parsed_rss_feed'    => $parsed,
             'channel'            => $channel,
             'episodes'           => $episodes,
