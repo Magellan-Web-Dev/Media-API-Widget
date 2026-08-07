@@ -13,13 +13,156 @@ function mawSanitizeImageUrl(url) {
     return trimmed.replace(/["\\\r\n]/g, "");
 }
 
+// Playback Progress Rendering
+//
+// Progress is drawn from requestAnimationFrame straight off audio.currentTime
+// so the filler tracks playback every frame instead of stepping once per timer
+// tick. The filler is moved with transform: translateX() (see style.css) so the
+// compositor can move it without re-laying out the bar.
+
+const PROGRESS_RESET_MS = 80;
+
+const prefersReducedMotion = typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    : false;
+
+let progressRafId = null;
+
+let progressResetTimer = null;
+
+let progressResetting = false;
+
+// Clamped 0-1 play position. Duration is unknown (NaN), zero, or Infinity for
+// streamed sources and before metadata arrives, so guard the division to keep
+// NaN / Infinity out of the CSS.
+
+function getProgressRatio() {
+    const duration = audio.duration;
+    if (!Number.isFinite(duration) || duration <= 0) {
+        return 0;
+    }
+    const ratio = audio.currentTime / duration;
+    if (!Number.isFinite(ratio)) {
+        return 0;
+    }
+    return Math.min(Math.max(ratio, 0), 1);
+}
+
+// The filler is a full width pill slid left out of the track (see style.css),
+// so 0 is translateX(-100%) and 1 is translateX(0). Clamped here as well as at
+// the callers, since this is the only place that writes the style.
+
+function renderProgressBar(ratio) {
+    const safeRatio = Number.isFinite(ratio) ? Math.min(Math.max(ratio, 0), 1) : 0;
+    progressFiller.style.transform = `translateX(${(safeRatio - 1) * 100}%)`;
+}
+
+function stopProgressAnimation() {
+    if (progressRafId !== null) {
+        cancelAnimationFrame(progressRafId);
+        progressRafId = null;
+    }
+}
+
+// Always cancels the previous loop first so play/seek/source changes can call
+// this freely without stacking loops.
+
+function startProgressAnimation() {
+    stopProgressAnimation();
+
+    const step = () => {
+        progressRafId = requestAnimationFrame(step);
+        if (progressResetting) {
+            return;
+        }
+        renderProgressBar(getProgressRatio());
+        setCurrentPlayTime();
+    };
+
+    progressRafId = requestAnimationFrame(step);
+}
+
+// Drops an in-flight reset so a seek paints at the new position right away
+// instead of easing there.
+
+function cancelProgressReset() {
+    clearTimeout(progressResetTimer);
+    progressResetTimer = null;
+    progressResetting = false;
+    progressFiller.classList.remove("progress-resetting");
+}
+
+function renderProgressBarImmediate(ratio) {
+    cancelProgressReset();
+    renderProgressBar(ratio);
+}
+
+// Runs the short slide from the finished position back to zero before the next
+// episode starts painting. progressResetting keeps the rAF loop from writing
+// over the transition while it plays.
+
+function resetProgressBar() {
+    stopProgressAnimation();
+    cancelProgressReset();
+
+    if (prefersReducedMotion) {
+        renderProgressBar(0);
+        return;
+    }
+
+    progressResetting = true;
+    progressFiller.classList.add("progress-resetting");
+
+    // Flush the added class so the transition starts from the current scale.
+
+    void progressFiller.offsetWidth;
+
+    renderProgressBar(0);
+
+    progressResetTimer = setTimeout(() => {
+        progressResetTimer = null;
+        progressResetting = false;
+        progressFiller.classList.remove("progress-resetting");
+    }, PROGRESS_RESET_MS);
+}
+
+// Tie the loop to the element's own playback state so it can never outlive
+// playback or double up.
+
+audio.addEventListener("play", startProgressAnimation);
+
+audio.addEventListener("pause", stopProgressAnimation);
+
+audio.addEventListener("emptied", stopProgressAnimation);
+
+audio.addEventListener("ended", () => {
+    stopProgressAnimation();
+    if (!progressResetting) {
+        renderProgressBar(1);
+    }
+});
+
+// Covers seeks made while paused, and any clamping the browser applied.
+
+audio.addEventListener("seeked", () => {
+    if (!progressResetting) {
+        renderProgressBar(getProgressRatio());
+    }
+});
+
 // Set Current Play Time
 
-let playCounter = null;
+let lastPlayTimeText = "";
+
+function setEpisodeTimeText(text) {
+    if (text !== lastPlayTimeText) {
+        lastPlayTimeText = text;
+        episodeTime.innerText = text;
+    }
+}
 
 function setCurrentPlayTime() {
     if (audio.currentTime >= audio.duration) {
-        clearInterval(playCounter);
         return;
     }
     let totalCurrentTime = audio.currentTime;
@@ -48,11 +191,7 @@ function setCurrentPlayTime() {
         }
     }
     hours = Number(hours) < 10 ? `0${Number(hours)}` : hours;
-    episodeTime.innerText = audio.duration > 3600 ? `${hours}:${minutes}:${seconds}` : audio.duration > 60 ? `${minutes}:${seconds}` : `00:${seconds}`;
-}
-
-function progressBarTimeCalc() {
-    return `${100 - ((audio.currentTime / audio.duration) * 100)}%`
+    setEpisodeTimeText(audio.duration > 3600 ? `${hours}:${minutes}:${seconds}` : audio.duration > 60 ? `${minutes}:${seconds}` : `00:${seconds}`);
 }
 
 // Toggle Play
@@ -69,22 +208,18 @@ function togglePlay(starting) {
         const playRequest = audio.play();
         Promise.resolve(playRequest).then(() => {
             playButtonIcon.classList.add("playing-active");
-            clearInterval(playCounter);
-            playCounter = setInterval(() => {
-                progressFiller.style.right = progressBarTimeCalc();
-                setCurrentPlayTime();
-            }, 250);
+            startProgressAnimation();
         }).catch(() => {
             // Browsers may reject audible autoplay despite a user opening the
             // lightbox. Leave the player paused and ready for a manual click.
             playing = false;
             playButtonIcon.classList.remove("playing-active");
-            clearInterval(playCounter);
+            stopProgressAnimation();
         });
     } else {
         playButtonIcon.classList.remove("playing-active");
         audio.pause();
-        clearInterval(playCounter);
+        stopProgressAnimation();
     }
 }
 
@@ -106,24 +241,31 @@ window.addEventListener("keyup", e => {
     }
 });
 
+// Seek by a relative offset and paint the bar right away, so the move is
+// visible even while paused.
+
+function seekBy(offsetSeconds) {
+    const duration = audio.duration;
+    const maxTime = Number.isFinite(duration) && duration > 0 ? duration : Infinity;
+    audio.currentTime = Math.min(Math.max(audio.currentTime + offsetSeconds, 0), maxTime);
+    renderProgressBarImmediate(getProgressRatio());
+    setCurrentPlayTime();
+}
+
 window.addEventListener("keydown", e => {
 
     switch(e.code) {
-        
+
         // Arrow Left Rewind One Second
 
         case 'ArrowLeft':
-            audio.currentTime = audio.currentTime - 1;
-            progressBarTimeCalc();
-            setCurrentPlayTime();
+            seekBy(-1);
             break;
 
         // Arrow Right Advance One Second
 
         case 'ArrowRight':
-            audio.currentTime = audio.currentTime + 1;
-            progressBarTimeCalc();
-            setCurrentPlayTime();
+            seekBy(1);
             break;
     }
 });
@@ -131,12 +273,16 @@ window.addEventListener("keydown", e => {
 // Set Progress Bar
 
 function setProgressBar(e) {
-    const clickPoint = e.offsetX;
     const totalBarWidth = progressBar.clientWidth;
-    const barPercentage = clickPoint / totalBarWidth;
-    progressFiller.style.right = `${100 - (barPercentage * 100)}%`;
-    const playPosition = barPercentage * audio.duration;
-    audio.currentTime = playPosition;
+    if (!totalBarWidth) {
+        return;
+    }
+    const barPercentage = Math.min(Math.max(e.offsetX / totalBarWidth, 0), 1);
+    renderProgressBarImmediate(barPercentage);
+    const duration = audio.duration;
+    if (Number.isFinite(duration) && duration > 0) {
+        audio.currentTime = barPercentage * duration;
+    }
     setCurrentPlayTime();
 }
 
@@ -190,6 +336,12 @@ window.addEventListener("load", initDescriptionScrollText);
 // Initialize On Load / Click On Episode List Item Event Handler
 
 let currentEpisodeData;
+
+// Bumped on every source change. A stale one-shot "loadedmetadata" listener
+// left over from a source that never loaded compares tokens and bails, so only
+// the newest source change ever runs its handler.
+
+let sourceChangeToken = 0;
 
 function setTotalEpisodeTime(item, event) {
 
@@ -249,11 +401,23 @@ function setTotalEpisodeTime(item, event) {
 
         episodeDescription.style.left = `0px`;
 
+        // Run the short slide back to zero before the new source is attached.
+        // resetProgressBar() also stops the running loop, so nothing repaints
+        // the old position while the reset plays.
+
+        resetProgressBar();
+
+        const currentSourceChange = ++sourceChangeToken;
+
         audio.src = currentEpisodeData.enclosure['@attributes'].url;
 
         // Set Time Of Episode
 
         audio.addEventListener("loadedmetadata", () => {
+
+            if (currentSourceChange !== sourceChangeToken) {
+                return;
+            }
 
             let totalDurationTime = audio.duration;
 
@@ -289,7 +453,7 @@ function setTotalEpisodeTime(item, event) {
             episodeTime.style.width = hasHours ? '7.3ch' : '5ch';
 
             if (event === 'init') {
-                episodeTime.innerText = hasHours ? `00:00:00` : `00:00`;
+                setEpisodeTimeText(hasHours ? `00:00:00` : `00:00`);
             }
 
             episodeDescription.style.left = '0px';
@@ -301,7 +465,7 @@ function setTotalEpisodeTime(item, event) {
             }
             
             initDescriptionScrollText();
-        });
+        }, { once: true });
     }
 }
 
@@ -330,5 +494,6 @@ setTotalEpisodeTime(null, 'init');
             playButtonIcon.classList.remove("playing-active");
             playing = false;
             audio.currentTime = 0;
+            resetProgressBar();
         }
     });

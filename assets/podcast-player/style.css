@@ -197,14 +197,38 @@ header img, #episodes-list li img {
     overflow: hidden;
 }
 
+/* The filler is a full width pill translated left so that only the played
+   fraction sits inside the track, which the bar clips (overflow: hidden). It is
+   moved rather than scaled so its border-radius is never distorted: the leading
+   edge keeps its true rounded cap at every position. translateX also keeps the
+   whole thing on the compositor instead of re-laying out the bar.
+
+   translateX(-100%) is empty, translateX(0) is full.
+
+   Playback is driven frame by frame from JS with no transition; the transition
+   is only switched on for the short slide back to zero between episodes. */
+
 #play-progress-bar #progress-duration-filler {
     position: absolute;
+    left: 0;
+    top: 0;
     width: 100%;
     height: 100%;
     background: var(--color1);
     border-radius: 2rem;
-    transition: 0.08s;
+    transform: translateX(-100%);
+    will-change: transform;
     pointer-events: none;
+}
+
+#play-progress-bar #progress-duration-filler.progress-resetting {
+    transition: transform 0.08s linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #play-progress-bar #progress-duration-filler.progress-resetting {
+        transition: none;
+    }
 }
 
 #episodes-list {

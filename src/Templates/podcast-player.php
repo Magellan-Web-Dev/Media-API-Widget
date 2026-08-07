@@ -94,7 +94,7 @@ $base_url = MAW_PLUGIN_URL . 'assets/podcast-player';
                     <div class="player-episode-description-container">
                         <h6 id="player-episode-description"><?= esc_html((string) $episode_selected->description); ?></h6>
                     </div>
-                    <div id="play-progress-bar"><div id="progress-duration-filler" style="right: 100%;"></div></div>
+                    <div id="play-progress-bar"><div id="progress-duration-filler" style="transform: translateX(-100%);"></div></div>
                 </div>
             </header>
 
