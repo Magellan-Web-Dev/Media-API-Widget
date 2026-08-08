@@ -219,6 +219,7 @@ header img, #episodes-list li img {
     transform: translateX(-100%);
     will-change: transform;
     pointer-events: none;
+    transition: 0.1s;
 }
 
 #play-progress-bar #progress-duration-filler.progress-resetting {
