@@ -179,6 +179,88 @@ function maw_youtube_page(int $itemCount, ?string $nextPageToken, int $totalResu
 }
 
 /**
+ * Builds a playlistItems page whose items carry exactly the thumbnails given.
+ *
+ * Real playlists are ragged: YouTube omits any size it did not generate, and a
+ * snippet can arrive with no `thumbnails` object at all. Each entry is the
+ * `thumbnails` value for one item, or null to leave the key off entirely.
+ *
+ * @param array<int,array<string,mixed>|null> $thumbnailSets One entry per item.
+ * @return array<string,mixed> Decoded response payload.
+ */
+function maw_youtube_thumbnail_page(array $thumbnailSets): array
+{
+    $items = [];
+
+    foreach (array_values($thumbnailSets) as $index => $thumbnails) {
+        $n       = $index + 1;
+        $snippet = [
+            'title'       => 'Episode ' . $n,
+            'description' => 'Description for episode ' . $n,
+            'publishedAt' => sprintf('2026-01-%02dT12:00:00Z', ($n % 28) + 1),
+            'resourceId'  => ['videoId' => sprintf('vid%05d', $n)],
+        ];
+
+        if ($thumbnails !== null) {
+            $snippet['thumbnails'] = $thumbnails;
+        }
+
+        $items[] = ['snippet' => $snippet];
+    }
+
+    return [
+        'kind'     => 'youtube#playlistItemListResponse',
+        'items'    => $items,
+        'pageInfo' => ['totalResults' => count($items), 'resultsPerPage' => 50],
+    ];
+}
+
+/**
+ * Builds one thumbnail size entry, matching the shape the API returns.
+ *
+ * @param string $size Size name, e.g. 'maxres'.
+ * @param int    $n    Item number, so URLs stay distinguishable.
+ * @return array<string,mixed> Thumbnail object.
+ */
+function maw_thumbnail(string $size, int $n = 1): array
+{
+    return [
+        'url'    => sprintf('https://i.ytimg.com/vi/vid%05d/%s.jpg', $n, $size),
+        'width'  => 1280,
+        'height' => 720,
+    ];
+}
+
+/**
+ * Runs a callable with a handler that records every PHP diagnostic raised.
+ *
+ * Warnings and notices are what a missing optional array key produces, and they
+ * are invisible to a normal assertion — the value still comes back null. This
+ * captures them so a test can assert none were emitted at all.
+ *
+ * @param callable $callback Code to run.
+ * @return array{result:mixed,errors:array<int,string>} Return value and messages.
+ */
+function maw_capture_php_errors(callable $callback): array
+{
+    $errors = [];
+
+    set_error_handler(static function (int $level, string $message, string $file = '', int $line = 0) use (&$errors): bool {
+        $errors[] = sprintf('%d: %s at %s:%d', $level, $message, basename($file), $line);
+
+        return true;
+    });
+
+    try {
+        $result = $callback();
+    } finally {
+        restore_error_handler();
+    }
+
+    return ['result' => $result, 'errors' => $errors];
+}
+
+/**
  * Returns a media config array for MediaContent's YouTube loader.
  *
  * @param array<string,mixed> $overrides Values to merge over the defaults.

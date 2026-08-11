@@ -798,21 +798,24 @@ final class MediaContent
                     } else {
                         $itemOutput['id'] = null;
                     }
-                    if ($snippet['thumbnails']) {
-                        $thumbnails = $snippet['thumbnails'];
-                        if ($thumbnails['maxres']) {
-                            $itemOutput['thumbnail'] = $thumbnails['maxres'];
-                        } else if ($thumbnails['standard']) {
-                            $itemOutput['thumbnail'] = $thumbnails['standard'];
-                        } else if ($thumbnails['high']) {
-                            $itemOutput['thumbnail'] = $thumbnails['high'];
-                        } else if ($thumbnails['medium']) {
-                            $itemOutput['thumbnail'] = $thumbnails['medium'];
-                        } else if ($thumbnails['default']) {
-                            $itemOutput['default'] = $thumbnails['default'];
+                    // The API only includes a thumbnail size when it actually
+                    // generated one, so every key below is optional: shorts,
+                    // low-resolution uploads, and older videos routinely arrive
+                    // with no maxres and no standard. Each size is therefore
+                    // checked for existence before it is read, in the same
+                    // preference order as before, and the item falls through to
+                    // a null thumbnail when the snippet carries nothing usable.
+                    $itemOutput['thumbnail'] = null;
+
+                    $thumbnails = isset($snippet['thumbnails']) && is_array($snippet['thumbnails'])
+                        ? $snippet['thumbnails']
+                        : [];
+
+                    foreach (['maxres', 'standard', 'high', 'medium', 'default'] as $size) {
+                        if (!empty($thumbnails[$size])) {
+                            $itemOutput['thumbnail'] = $thumbnails[$size];
+                            break;
                         }
-                    } else {
-                        $itemOutput['thumbnail'] = null;
                     }
                     if ($snippet['publishedAt'] !== '') {
                         $itemOutput['publishedDate'] = $snippet['publishedAt'];
@@ -831,7 +834,9 @@ final class MediaContent
                 $itemOutput['id'] = null;
             }
 
-            if ($itemOutput['thumbnail'] !== null) {
+            // The falsy-$item branch above never sets a thumbnail, so this read
+            // is guarded too; the outcome is unchanged, only the warning is gone.
+            if (($itemOutput['thumbnail'] ?? null) !== null) {
                 array_push($parsedData, $itemOutput);
             }
         }
