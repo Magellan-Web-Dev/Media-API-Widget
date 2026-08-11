@@ -92,7 +92,14 @@ $base_url = MAW_PLUGIN_URL . 'assets/podcast-player';
                         </div>
                     </div>
                     <div class="player-episode-description-container">
-                        <h6 id="player-episode-description"><?= esc_html((string) $episode_selected->description); ?></h6>
+                        <?php /* The description doubles as the marquee track. The second copy is a
+                                 purely visual duplicate that makes the scroll loop seamlessly: it is
+                                 hidden from assistive tech and stays display:none until the script
+                                 decides the text is wider than the visible window. */ ?>
+                        <h6 id="player-episode-description">
+                            <span class="episode-description-copy"><?= esc_html((string) $episode_selected->description); ?></span>
+                            <span class="episode-description-copy episode-description-duplicate" aria-hidden="true"><?= esc_html((string) $episode_selected->description); ?></span>
+                        </h6>
                     </div>
                     <div id="play-progress-bar"><div id="progress-duration-filler" style="transform: translateX(-100%);"></div></div>
                 </div>

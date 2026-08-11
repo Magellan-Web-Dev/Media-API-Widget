@@ -177,9 +177,71 @@ header img, #episodes-list li img {
     padding: 0 0.75rem;
 }
 
+/* The description element is the marquee track: it lays the two identical
+   copies out in a row and is slid left by exactly one copy's advance (copy
+   width plus the gap), so at the loop point the second copy sits precisely
+   where the first one started and the restart is invisible.
+
+   Only transform is animated, so the scroll stays on the compositor and never
+   re-lays out the player. The distance, duration and the one-off start delay
+   are measured in JS and handed over as custom properties.
+
+   The gap between the copies is one character wide, so the repeat reads as a
+   word space rather than a visible break. Being font relative it tracks the
+   text size, and JS measures the real gap off the layout, so the scroll
+   distance and duration follow it automatically. */
+
 #player-episode-description {
     white-space: nowrap;
-    position: relative;
+    display: flex;
+    align-items: baseline;
+    gap: 1ch;
+}
+
+#player-episode-description .episode-description-copy {
+    flex: 0 0 auto;
+}
+
+/* The duplicate only exists for the loop, so it is out of the layout entirely
+   until the text is known to overflow. */
+
+#player-episode-description .episode-description-duplicate {
+    display: none;
+}
+
+#player-episode-description.description-duplicated .episode-description-duplicate {
+    display: block;
+}
+
+@keyframes description-marquee {
+    from { transform: translate3d(0, 0, 0); }
+    to { transform: translate3d(calc(var(--description-scroll-distance, 0px) * -1), 0, 0); }
+}
+
+/* animation-delay only applies ahead of the first iteration, which is exactly
+   the behaviour wanted here: one initial pause, then unbroken repetitions. */
+
+#player-episode-description.description-scrolling {
+    animation-name: description-marquee;
+    animation-duration: var(--description-scroll-duration, 0s);
+    animation-delay: var(--description-scroll-delay, 0ms);
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    will-change: transform;
+}
+
+/* The script never starts the marquee in this mode; these rules also cover the
+   preference being changed after the player has loaded. */
+
+@media (prefers-reduced-motion: reduce) {
+    #player-episode-description.description-scrolling {
+        animation: none;
+        transform: none;
+    }
+
+    #player-episode-description.description-duplicated .episode-description-duplicate {
+        display: none;
+    }
 }
 
 #player-episode-description br {
@@ -297,10 +359,6 @@ header img, #episodes-list li img {
     min-width: 0;
     z-index: 1;
     width: 100%;
-}
-
-#player-episode-description {
-    transition: 0.01s;
 }
 
 .episode-list-title-description p {

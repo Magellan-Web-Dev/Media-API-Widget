@@ -296,42 +296,218 @@ window.addEventListener("mouseup", () => {
     progressBar.removeEventListener("mousemove", setProgressBar, true);
 });
 
-// Episode Description Text Scroll Across Handling
+// Episode Description Marquee
+//
+// The description element is the marquee track (see style.css): it holds two
+// identical copies of the text and is slid left by exactly one copy's advance -
+// the copy's width plus the gap between the copies - with a linear CSS
+// animation. At the loop point the second copy is sitting precisely where the
+// first one started, so the reset cannot be seen. Only transform is animated,
+// which keeps the scroll on the compositor; nothing here writes left, margins
+// or any other layout property.
+//
+// The marquee is only switched on when the text is genuinely wider than the
+// visible window. Shorter descriptions stay where they are and their duplicate
+// stays out of the layout.
 
-let startDescriptionScroll;
+// The old timer moved 1px every 28ms, i.e. ~36px per second.
 
-let descriptionDelayStart;
+const DESCRIPTION_SCROLL_PX_PER_SECOND = 36;
 
-function initDescriptionScrollText() {
+// Pause before the first pass. CSS animation-delay only applies ahead of the
+// first iteration, so the repetitions after it run on without another pause.
 
-    // Stop Existing Scrolling Of Description Text
+const DESCRIPTION_SCROLL_DELAY_MS = 5000;
 
-    clearInterval(startDescriptionScroll);
+const descriptionContainer = episodeDescription.parentElement;
 
-    clearTimeout(descriptionDelayStart);
+const descriptionCopies = episodeDescription.querySelectorAll(".episode-description-copy");
 
-    descriptionDelayStart = setTimeout(() => {
-        let descriptionTextOffset = 0;
+const descriptionPrimaryCopy = descriptionCopies.length > 0 ? descriptionCopies[0] : null;
 
-        const descriptionWidth = episodeDescription.scrollWidth;
-        const containerWidth = episodeDescription.parentNode.clientWidth;
+const descriptionDuplicateCopy = descriptionCopies.length > 1 ? descriptionCopies[1] : null;
 
-        startDescriptionScroll = setInterval(() => {
+// When the current pass is due to start moving. A recalculation that lands
+// during the initial delay carries the remainder over instead of restarting the
+// full five seconds.
 
-            descriptionTextOffset--;
+let descriptionScrollBeginsAt = 0;
 
-            episodeDescription.style.left = `${descriptionTextOffset}px`;
+// Last measurement, so a resize that changes nothing the marquee depends on
+// does not restart the animation.
 
-            if ((descriptionTextOffset * -1) >= (descriptionWidth + 24)) {
-                descriptionTextOffset = containerWidth + 24;
-                episodeDescription.style.left = `${descriptionTextOffset}px`
-            }
+let lastDescriptionCopyWidth = -1;
 
-        }, 28)
-    }, 5000);
+let lastDescriptionShouldScroll = false;
+
+let descriptionRefreshRafId = null;
+
+function descriptionMarqueeAvailable() {
+    return !prefersReducedMotion
+        && descriptionContainer !== null
+        && descriptionPrimaryCopy !== null
+        && descriptionDuplicateCopy !== null;
 }
 
-window.addEventListener("load", initDescriptionScrollText);
+// Width the text is actually visible across: the container's content box. Its
+// horizontal padding is only there to give the edge mask room to fade.
+
+function getDescriptionViewportWidth() {
+    const styles = window.getComputedStyle(descriptionContainer);
+    const paddingLeft = parseFloat(styles.paddingLeft);
+    const paddingRight = parseFloat(styles.paddingRight);
+    const padding = (Number.isFinite(paddingLeft) ? paddingLeft : 0) + (Number.isFinite(paddingRight) ? paddingRight : 0);
+    return descriptionContainer.clientWidth - padding;
+}
+
+// A copy's own width never changes with the gap or with the transform, so this
+// is safe to read while the marquee is running. 1px of slack keeps sub-pixel
+// rounding from starting a scroll nobody asked for.
+
+function isDescriptionOverflowing(copyWidth, viewportWidth) {
+    return copyWidth > 0 && viewportWidth > 0 && copyWidth > viewportWidth + 1;
+}
+
+// Re-measures and (re)starts the marquee from its starting position. delayMs is
+// how long to wait before the first pass.
+
+function applyDescriptionMarquee(delayMs) {
+    const safeDelay = Math.max(delayMs, 0);
+
+    descriptionScrollBeginsAt = performance.now() + safeDelay;
+
+    // Dropping both classes returns the track to translate(0) and takes the
+    // duplicate back out of the layout.
+
+    episodeDescription.classList.remove("description-scrolling");
+    episodeDescription.classList.remove("description-duplicated");
+
+    if (!descriptionMarqueeAvailable()) {
+        lastDescriptionCopyWidth = -1;
+        lastDescriptionShouldScroll = false;
+        return;
+    }
+
+    // Reading a rect flushes the pending class removal, so re-adding the class
+    // below starts a brand new animation rather than resuming the old one.
+
+    const copyWidth = descriptionPrimaryCopy.getBoundingClientRect().width;
+    const viewportWidth = getDescriptionViewportWidth();
+    const shouldScroll = isDescriptionOverflowing(copyWidth, viewportWidth);
+
+    lastDescriptionCopyWidth = copyWidth;
+    lastDescriptionShouldScroll = shouldScroll;
+
+    if (!shouldScroll) {
+        return;
+    }
+
+    // Show the duplicate before measuring the distance, so the one character
+    // gap between the copies (see style.css) is part of it. Measuring copy to
+    // copy rather than adding numbers up keeps the distance exact even with
+    // fractional text and gap widths, and a uniform transform cancels out of
+    // the subtraction.
+
+    episodeDescription.classList.add("description-duplicated");
+
+    const distance = descriptionDuplicateCopy.getBoundingClientRect().left - descriptionPrimaryCopy.getBoundingClientRect().left;
+
+    if (!(distance > 0)) {
+        episodeDescription.classList.remove("description-duplicated");
+        lastDescriptionShouldScroll = false;
+        return;
+    }
+
+    // Duration from distance, so the speed in pixels per second is the same
+    // whatever the description's length.
+
+    episodeDescription.style.setProperty("--description-scroll-distance", `${distance}px`);
+    episodeDescription.style.setProperty("--description-scroll-duration", `${distance / DESCRIPTION_SCROLL_PX_PER_SECOND}s`);
+    episodeDescription.style.setProperty("--description-scroll-delay", `${safeDelay}ms`);
+
+    episodeDescription.classList.add("description-scrolling");
+}
+
+// Episode change: back to the start of the new text, with the full delay again.
+
+function resetDescriptionMarquee() {
+    applyDescriptionMarquee(DESCRIPTION_SCROLL_DELAY_MS);
+}
+
+// Layout/font change: only restart if something the marquee depends on actually
+// moved, otherwise a drag-resize would keep yanking the text back to the start.
+// Any leftover initial delay is carried over.
+
+function refreshDescriptionMarquee() {
+    if (!descriptionMarqueeAvailable()) {
+        return;
+    }
+
+    const copyWidth = descriptionPrimaryCopy.getBoundingClientRect().width;
+    const viewportWidth = getDescriptionViewportWidth();
+    const shouldScroll = isDescriptionOverflowing(copyWidth, viewportWidth);
+
+    if (shouldScroll === lastDescriptionShouldScroll && Math.abs(copyWidth - lastDescriptionCopyWidth) < 0.5) {
+        return;
+    }
+
+    applyDescriptionMarquee(descriptionScrollBeginsAt - performance.now());
+}
+
+// Coalesces bursts of resize/font notifications into one measurement per frame.
+
+function scheduleDescriptionRefresh() {
+    if (descriptionRefreshRafId !== null) {
+        return;
+    }
+    descriptionRefreshRafId = requestAnimationFrame(() => {
+        descriptionRefreshRafId = null;
+        refreshDescriptionMarquee();
+    });
+}
+
+// Writes the episode's description into both copies and restarts the marquee.
+// textContent, never innerHTML: the text comes from the feed.
+
+function setEpisodeDescriptionText(text) {
+    const description = typeof text === "string" ? text : "";
+
+    if (descriptionPrimaryCopy === null) {
+        episodeDescription.textContent = description;
+        return;
+    }
+
+    descriptionPrimaryCopy.textContent = description;
+
+    if (descriptionDuplicateCopy !== null) {
+        descriptionDuplicateCopy.textContent = description;
+    }
+
+    resetDescriptionMarquee();
+}
+
+// A single observer for the life of the player, so nothing accumulates.
+
+if (descriptionContainer !== null) {
+    if (typeof ResizeObserver === "function") {
+        new ResizeObserver(scheduleDescriptionRefresh).observe(descriptionContainer);
+    } else {
+        window.addEventListener("resize", scheduleDescriptionRefresh);
+    }
+}
+
+// A webfont arriving after the first measurement changes the text width, so
+// re-check once the font set settles.
+
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+    document.fonts.ready.then(scheduleDescriptionRefresh);
+
+    if (typeof document.fonts.addEventListener === "function") {
+        document.fonts.addEventListener("loadingdone", scheduleDescriptionRefresh);
+    }
+}
+
+window.addEventListener("load", scheduleDescriptionRefresh);
 
 // Initialize On Load / Click On Episode List Item Event Handler
 
@@ -396,10 +572,11 @@ function setTotalEpisodeTime(item, event) {
         episodeSelectedTitle.innerText = currentEpisodeData.title;
 
         // Set Description Text
+        //
+        // Fills both marquee copies, re-measures the new text against the
+        // container and returns the track to its starting position.
 
-        episodeDescription.innerText = typeof currentEpisodeData.description === 'object' ? '' : currentEpisodeData.description;
-
-        episodeDescription.style.left = `0px`;
+        setEpisodeDescriptionText(typeof currentEpisodeData.description === 'object' ? '' : currentEpisodeData.description);
 
         // Run the short slide back to zero before the new source is attached.
         // resetProgressBar() also stops the running loop, so nothing repaints
@@ -456,15 +633,17 @@ function setTotalEpisodeTime(item, event) {
                 setEpisodeTimeText(hasHours ? `00:00:00` : `00:00`);
             }
 
-            episodeDescription.style.left = '0px';
-
             if (event === 'init') {
                 togglePlay(autoplayEnabled);
             } else {
                 togglePlay(true);
             }
-            
-            initDescriptionScrollText();
+
+            // The delay is already running from when the description was set;
+            // this only picks up any layout change the metadata caused (the
+            // play time column is re-sized just above).
+
+            refreshDescriptionMarquee();
         }, { once: true });
     }
 }
