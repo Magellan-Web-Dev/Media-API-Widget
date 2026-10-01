@@ -1430,8 +1430,26 @@
 (function () {
     "use strict";
 
-    function initMawGridSearch() {
-        document.querySelectorAll(".maw-grid-search-wrapper").forEach(function (wrapper) {
+    // Wrappers that already have listeners. The page-load pass binds every
+    // grid once, exactly as before; later calls (from the Elementor
+    // integration, for grids rendered after load) skip anything bound.
+    var boundWrappers = typeof WeakSet === "function" ? new WeakSet() : null;
+
+    // Binds the grids inside root. When a signal is given, every listener is
+    // registered with it, so aborting releases that grid and allows it to be
+    // bound again. Without a signal the listeners are added exactly as before.
+    function initMawGridSearchIn(root, signal) {
+        if (signal && signal.aborted) {
+            return;
+        }
+
+        var listenerOptions = signal ? { signal: signal } : undefined;
+
+        root.querySelectorAll(".maw-grid-search-wrapper").forEach(function (wrapper) {
+            if (boundWrappers && boundWrappers.has(wrapper)) {
+                return;
+            }
+
             var gridId       = wrapper.dataset.mawGridId;
             var playlistName = wrapper.dataset.mawPlaylist;
             var mediaType    = wrapper.dataset.mawMediatype;
@@ -1440,6 +1458,10 @@
 
             if (!playlistName || !mediaType || !gridKey) {
                 return;
+            }
+
+            if (boundWrappers) {
+                boundWrappers.add(wrapper);
             }
 
             var searchBar    = document.querySelector(".maw-grid-search-bar[data-maw-for=\"" + gridId + "\"]");
@@ -1516,7 +1538,7 @@
                         if (page && page !== currentPage) {
                             doRequest(page, true);
                         }
-                    });
+                    }, listenerOptions);
                 });
             }
 
@@ -1528,7 +1550,7 @@
                 if (page !== currentPage) {
                     doRequest(page, false);
                 }
-            });
+            }, listenerOptions);
 
             if (searchBar) {
                 var input       = searchBar.querySelector(".maw-search-input");
@@ -1543,7 +1565,7 @@
                             currentSearchBy = select ? select.value : "any";
                             doRequest(1, false);
                         }, 400);
-                    });
+                    }, listenerOptions);
                 }
 
                 if (select) {
@@ -1552,7 +1574,7 @@
                         if (currentSearch !== "") {
                             doRequest(1, false);
                         }
-                    });
+                    }, listenerOptions);
                 }
 
                 if (clearButton && input) {
@@ -1563,11 +1585,33 @@
                         currentSearchBy = select ? select.value : "any";
                         doRequest(1, false);
                         input.focus();
-                    });
+                    }, listenerOptions);
                 }
+            }
+
+            if (signal) {
+                signal.addEventListener("abort", function () {
+                    clearTimeout(debounceTimer);
+                    if (boundWrappers) {
+                        boundWrappers.delete(wrapper);
+                    }
+                });
             }
         });
     }
+
+    function initMawGridSearch() {
+        initMawGridSearchIn(document);
+    }
+
+    // Lets the Elementor integration bind grids it renders after page load
+    // (and release them with an AbortSignal when a widget re-renders or is
+    // removed). Calling it never rebinds a grid that is already bound.
+    window.mawGridSearch = {
+        init: function (root, signal) {
+            initMawGridSearchIn(root && typeof root.querySelectorAll === "function" ? root : document, signal);
+        }
+    };
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", initMawGridSearch);

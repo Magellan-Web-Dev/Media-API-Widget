@@ -6,6 +6,7 @@ use MediaApiWidget\Config\Options;
 use MediaApiWidget\Frontend\Assets;
 use MediaApiWidget\Frontend\MediaBootstrap;
 use MediaApiWidget\Frontend\Shortcode;
+use MediaApiWidget\Integrations\Elementor\Integration as ElementorIntegration;
 use MediaApiWidget\Routing\PodcastPlayerRoute;
 use MediaApiWidget\Seo\MetaUpdater;
 use MediaApiWidget\Stats\ApiCallLogger;
@@ -77,6 +78,8 @@ final class Plugin
      * - {@see Shortcode}         — all four shortcode tags.
      * - {@see MetaUpdater}       — Open Graph / Twitter Card meta tags.
      * - {@see PodcastPlayerRoute} — /podcast/player custom route.
+     * - {@see ElementorIntegration} — optional Elementor widgets (hooks only;
+     *                                inert unless Elementor fires them).
      *
      * @return void
      */
@@ -99,5 +102,8 @@ final class Plugin
 
         // Custom podcast player route
         (new PodcastPlayerRoute())->register();
+
+        // Optional Elementor widgets
+        (new ElementorIntegration())->register();
     }
 }

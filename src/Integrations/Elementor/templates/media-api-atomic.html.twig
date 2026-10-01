@@ -1,0 +1,19 @@
+{#
+    Atomic wrapper for the Media API widget.
+
+    Renders only the atomic root element. Its content, settings.maw_output, is
+    the output of the plugin's existing shortcode renderers, added during the
+    server render. Elementor renders this template client-side in the editor,
+    where maw_output does not exist; the plugin's editor view replaces that
+    client render with the server render, and the notice below only shows if
+    that view is unavailable.
+#}
+{%- set id_attribute = settings._cssid is not empty ? 'id=' ~ settings._cssid | e('html_attr') : '' -%}
+{%- set classes = settings.classes | default([]) | merge(['maw-elementor-atomic']) | join(' ') -%}
+<div data-id="{{ id }}" data-interaction-id="{{ interaction_id }}" data-e-type="{{ type }}" {{ id_attribute }} class="{{ classes }}" {{ settings.attributes | raw }}>
+{%- if settings.maw_output is defined and settings.maw_output is not null -%}
+{{ settings.maw_output | raw }}
+{%- else -%}
+<div class="maw-elementor-notice">Media API preview is rendered by the server.</div>
+{%- endif -%}
+</div>

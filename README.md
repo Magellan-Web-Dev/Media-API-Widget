@@ -37,7 +37,13 @@ A WordPress plugin that syncs YouTube playlists and podcast RSS feeds to the fro
     - [`media_api_widget_data_stored` (action)](#media_api_widget_data_stored-action)
     - [`media_api_widget_update_stored_data()`](#media_api_widget_update_stored_data)
     - [Recommended asynchronous transcription workflow](#recommended-asynchronous-transcription-workflow)
-16. [Backward Compatibility](#backward-compatibility)
+16. [Elementor Widgets](#elementor-widgets)
+    - [Output modes](#output-modes)
+    - [Settings: default, value, empty, stored field](#settings-default-value-empty-stored-field)
+    - [Search grids and separate search bars](#search-grids-and-separate-search-bars)
+    - [Editor behavior](#editor-behavior)
+    - [`media_api_widget_grid_search_id` (filter)](#media_api_widget_grid_search_id-filter)
+17. [Backward Compatibility](#backward-compatibility)
 
 ---
 
@@ -606,6 +612,7 @@ The runner exits non-zero if any assertion fails. Groups live in `tests/cases/`:
 | `cache-integrity` | That a partial or failed refresh leaves the backup file, the transient, and the last-fetched timestamp untouched, and that the existing back-off and backup-window short-circuits still work. |
 | `options` | The new defaults, and that installs saved before the guard settings existed receive them at read time without the stored option being rewritten. |
 | `podcast` | That podcast, Apple/iTunes, and embed paths consume no YouTube budget, take no YouTube lock, and still work when the YouTube budget is exhausted. |
+| `elementor-integration` | That widget output is byte-identical to direct calls of the matching shortcode methods; that default, explicit false, empty, literal and stored-field settings map correctly and same-named stored fields still act as defaults; that hidden settings never reach the renderer; that widgets dispatch through the registered callback and its tag filters; that isolated and connected search grids stay independent while shortcode grids keep their id, grid key, settings transient and AJAX page parameter; that player styling overrides apply only to the widget call; that an editor render cannot request a podcast feed; and that nothing registers or fatals without Elementor. |
 | `backup-inventory` | That the API Stats backup columns resolve the same file the media pipeline writes, report `time_stored` (falling back to the file time), keep YouTube and podcast backups separate, and report nothing for a missing file, an unsupported media type, or an empty slug. |
 | `extension-api` | That the pre-store filter fires exactly once per complete successful refresh and never for a cache hit, backup read, partial refresh, failed request, unparseable feed, Apple lookup without a successful RSS fetch, or embed-only podcast; that the filtered value is written identically to the transient and backup and is what the current response renders; that a `WP_Error`, wrong shape, or unencodable return leaves the old data byte-for-byte intact; that the shortcode warm-up path cannot bypass the hooks; that the stored action is post-commit; that the global updater changes YouTube and podcast data with no external request while preserving custom item keys and storage formats; and that every lock is released on success, error, and thrown exception. |
 
@@ -955,6 +962,79 @@ A server-side update changes the transient and the backup file. It cannot reach 
 
 ---
 
+## Elementor Widgets
+
+When Elementor is active the plugin adds two widgets. Both render through the plugin's existing shortcode callbacks — the widget settings are translated into the attributes the matching shortcode would receive, so the output inside Elementor's wrapper is exactly the shortcode output. Nothing changes for sites without Elementor, and Elementor Pro is not required.
+
+| Widget | Requires | Editor |
+|---|---|---|
+| **Media API — Classic** | Elementor | Classic panel; listed under the **Media API** category. |
+| **Media API — Atomic** | Elementor with the Atomic Widgets feature active | V4 panel, Style tab, atomic element; listed with the atomic elements. Not registered when the feature is inactive. |
+
+The playlist selectors list the configured Media Items by name only. API keys, playlist IDs and feed URLs are never sent to the editor.
+
+### Output modes
+
+| Mode | Renders through |
+|---|---|
+| Media card | `[media-api-widget-render]` |
+| Grid | `[media-api-widget-render multiplegrid="true"]` |
+| Searchable grid with pagination | `[media-api-widget-render multiplegridusersearch="true"]`, plus `[media-api-widget-grid-search]` when **Show search bar above grid** is on |
+| Search bar only | `[media-api-widget-grid-search]` |
+| Title text / Description text / Description text (title fallback) | `[media-api-widget-render mediatitle / mediadescription]` |
+| Embedded podcast player | `[media-api-podcast-player]` |
+| Stored field value | `[media-api-widget field=""]` |
+
+The selected mode sets `mediatitle`, `mediadescription`, `multiplegrid` and `multiplegridusersearch` explicitly, so a stored field with one of those names cannot turn a card widget into a grid. Every other control is shown only for the modes, media types and options where the renderer uses it, and a value saved under a hidden control is never passed to the renderer.
+
+**Embedded podcast player styling.** The `[media-api-podcast-player]` shortcode accepts only `playlist_name`, `media_platform` and `orderdescending`; its colors, font and date option always come from the `podcast_player_*` stored fields. That shortcode behavior is unchanged. The widget's **Embedded Player** controls can override those values for that widget alone; anything left at *Default* still uses the stored fields.
+
+### Settings: default, value, empty, stored field
+
+Each setting that maps to a shortcode attribute offers:
+
+| Choice | Passed to the shortcode renderer |
+|---|---|
+| **Default** | The attribute is omitted, so the shortcode's built-in default — or a stored field with the same name as the attribute — applies, exactly as for a shortcode. |
+| **Yes / No**, a listed option, or **Custom value** | The value. A custom value left blank counts as *Default*. |
+| **Empty** | An empty string, where the renderer treats that differently from omitting the attribute. |
+| **Stored field: name** | `{{name}}`, resolved by the renderer — available for colors and numbers too. Text values may also contain `{{name}}` directly. |
+
+The search bar renderer does not resolve stored field references, so its settings do not offer them.
+
+### Search grids and separate search bars
+
+Shortcode grids and search bars link through `playlist_name` + `media_platform`, so every grid for one playlist shares one search bar and one `maw_page_{playlist}_{platform}` page parameter. A searchable grid widget chooses its **Search bar link**:
+
+| Link | Behavior |
+|---|---|
+| **This widget only** (default) | The grid has its own id, settings, and `maw_page_{id}` parameter. Use **Show search bar above grid** for its search bar. |
+| **Connection ID** | Shared with a **Search bar only** widget for the same playlist that uses the same Connection ID. |
+| **Shared playlist link** | Behaves exactly like the shortcode grid, and links to `[media-api-widget-grid-search]` bars for the playlist. |
+
+A **Search bar only** widget links either by Connection ID or through the shared playlist link.
+
+### Editor behavior
+
+- Widgets render in the classic and atomic editors through the same shortcode callbacks as on the front end. Search and pagination work in the editor preview, including after control changes, duplication, and removal.
+- Lightboxes do not open from cards inside the editor canvas. The existing click handler only accepts elements from the page's own document, and Elementor creates editor content in the editor window. This affects shortcodes inside Elementor widgets in the same way, and does not affect published pages or Elementor's Preview.
+- The editor never requests a YouTube API or podcast feed. If a podcast's cache is empty, the editor shows a notice instead of triggering the warm-up request the shortcode makes on the front end.
+- The atomic editor hides values for controls whose conditions no longer apply and restores them when the conditions apply again, for the rest of the browser session. This is Elementor's own behavior.
+- On save, Elementor stores each widget's equivalent shortcode text in the post content, so the page still renders through the shortcodes if Elementor is deactivated. Widget-only behavior (an isolated search id, player styling overrides) has no shortcode equivalent there.
+- The widgets are excluded from Elementor's element cache, because their output depends on cached media data, stored fields and the requested page.
+
+### `media_api_widget_grid_search_id` (filter)
+
+Filters the id that links a searchable grid to its search bar and names its `maw_page_{id}` parameter.
+
+```php
+$gridId = apply_filters('media_api_widget_grid_search_id', $gridId, $playlistName, $mediaType);
+```
+
+The default is `{playlist_name}_{media_platform}`. The Elementor widgets attach this filter only while their own grid renders. A grid rendered with a non-default id stores the id with its settings so AJAX pagination keeps using its parameter; grids with the default id render, hash, and store their settings exactly as before. The returned value is passed through `sanitize_key()`; an empty result falls back to the default.
+
+---
+
 ## Backward Compatibility
 
 - The plugin merges any `MEDIA_CONTENT_DATA` constant (defined by WPCode or a theme) with admin-configured media items, so legacy setups continue to work without changes.
@@ -969,4 +1049,5 @@ A server-side update changes the transient and the backup file. It cannot reach 
   - **The shortcode podcast cache warm-up honors the configured Media cache transient TTL** instead of a hardcoded 2 hours, and writes a backup file. If your TTL is set to something other than 7200 seconds, warmed podcast caches now respect it.
   - **Podcast data is normalized to a plain PHP array before being stored.** The stored transient is still a JSON string and every reader in the plugin already decoded it to an array, so this is not a format change. One serialization detail differs: an empty XML element now serializes as `[]` rather than `{}`, which is what the shortcode path already produced and what the front-end JavaScript handles better.
   - **A refresh whose data is refused now records a `store_rejected` guard event** on the Caching page. This is a new value in an existing reason list; unknown reasons were already displayed generically.
+- The Elementor integration is additive. Every shortcode tag, alias, attribute, default and output is unchanged, as are the AJAX search and pagination responses for shortcode grids, their grid keys and stored settings, and the legacy client-side `data-playlistname` rendering. The front-end script now exposes `window.mawGridSearch` and skips grids that are already bound; the page-load binding is unchanged.
 - The internal `MediaContent::backupDir()` and `BackupInventory` path methods still exist and still return the same paths in 5.0.0; they now delegate to a shared `Support\BackupFiles` class so the storage service, the fetch pipeline, and the Stats page cannot disagree about where a backup lives.

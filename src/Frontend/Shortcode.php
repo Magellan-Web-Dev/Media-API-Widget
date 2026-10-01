@@ -1487,6 +1487,31 @@ final class Shortcode
     }
 
     /**
+     * Returns the identifier that links a user-search grid to its search bar.
+     *
+     * The default, `{playlist_name}_{media_platform}`, is the identifier every
+     * grid and [media-api-widget-grid-search] bar has always used; it is also
+     * part of the grid's `maw_page_{id}` query parameter. The
+     * `media_api_widget_grid_search_id` filter lets the Elementor integration
+     * give one widget instance its own identifier, so two grids for the same
+     * playlist — and their separately placed search bars — stay independent.
+     * The integration only attaches the filter while that widget renders. With
+     * no callback registered, the default is returned unchanged.
+     *
+     * @param string $playlistName Sanitized playlist_name slug.
+     * @param string $mediaType    Sanitized media type.
+     * @return string Grid search identifier (sanitize_key-safe).
+     */
+    private function resolveGridSearchId(string $playlistName, string $mediaType): string
+    {
+        $default  = $playlistName . '_' . $mediaType;
+        $filtered = apply_filters('media_api_widget_grid_search_id', $default, $playlistName, $mediaType);
+        $filtered = is_string($filtered) ? sanitize_key($filtered) : '';
+
+        return $filtered !== '' ? $filtered : $default;
+    }
+
+    /**
      * Renders the search bar for a user-searchable grid.
      *
      * Associates with a [media-api-widget-render] grid that has
@@ -1519,7 +1544,7 @@ final class Shortcode
             return '';
         }
 
-        $gridId = $playlistName . '_' . $mediaType;
+        $gridId = $this->resolveGridSearchId($playlistName, $mediaType);
         $fieldId = sanitize_html_class($gridId);
 
         $selectId = 'maw-search-by-' . $fieldId;
@@ -1595,6 +1620,7 @@ final class Shortcode
         $noStyling        = (bool) ($gridConfig['noStyling'] ?? false);
         $maxPages         = (int) ($gridConfig['maxPages'] ?? 0);
         $maxDisplay       = (int) ($gridConfig['maxDisplay'] ?? 0);
+        $instanceGridId   = sanitize_key((string) ($gridConfig['gridId'] ?? ''));
         $settings['noStyling'] = $noStyling;
 
         $mediaConfig = $this->findMediaConfig($playlistName, $mediaType);
@@ -1670,7 +1696,9 @@ final class Shortcode
                 $gridHtml .
             '</div>';
 
-        $pageParam = 'maw_page_' . $playlistName . '_' . $mediaType;
+        // A grid rendered with its own search id (see resolveGridSearchId())
+        // stored that id with its settings; its links keep its page parameter.
+        $pageParam = 'maw_page_' . ($instanceGridId !== '' ? $instanceGridId : $playlistName . '_' . $mediaType);
 
         wp_send_json_success([
             'html'        => $gridWrapperHtml,
@@ -1708,15 +1736,20 @@ final class Shortcode
         $showall      = (bool) $itemData['multiplegridshowall'];
         $noresults    = (string) $itemData['noresults'];
         $noStyling    = (bool) $itemData['nostyling'];
-        $gridId       = $playlistName . '_' . $mediaType;
+        $gridId       = $this->resolveGridSearchId($playlistName, $mediaType);
+
+        // Non-empty only when the grid was given its own search id. Such a grid
+        // gets its own settings transient and records the id for the AJAX
+        // handler; a grid with the default id hashes and stores as it always has.
+        $instanceGridId = $gridId !== $playlistName . '_' . $mediaType ? $gridId : '';
 
         $gridSettings = $settings;
         if ($gridtext !== '') {
             $gridSettings['multipleGridText'] = $gridtext;
         }
 
-        $gridKey = substr(md5(wp_json_encode($gridSettings) . $playlistName . $mediaType . $gap . $minsize . $episodeRange . (string) $perPage . (string) $maxPages . (string) $maxDisplay), 0, 16);
-        set_transient('maw_grid_' . $gridKey, [
+        $gridKey = substr(md5(wp_json_encode($gridSettings) . $playlistName . $mediaType . $gap . $minsize . $episodeRange . (string) $perPage . (string) $maxPages . (string) $maxDisplay . $instanceGridId), 0, 16);
+        $gridConfig = [
             'settings'         => $gridSettings,
             'gap'              => $gap,
             'minsize'          => $minsize,
@@ -1727,7 +1760,11 @@ final class Shortcode
             'noStyling'        => $noStyling,
             'maxPages'         => $maxPages,
             'maxDisplay'       => $maxDisplay,
-        ], 86400);
+        ];
+        if ($instanceGridId !== '') {
+            $gridConfig['gridId'] = $instanceGridId;
+        }
+        set_transient('maw_grid_' . $gridKey, $gridConfig, 86400);
 
         $filteredData = $renderData;
         if (!$showall && preg_match('/^\s*(\d+)\s*-\s*(\d+)\s*$/', $episodeRange, $m) === 1) {
