@@ -136,7 +136,7 @@ final class ItemMapper
                 'source_id'     => $videoId,
                 'id_kind'       => 'vid',
                 'title'         => self::text($item['title'] ?? ''),
-                'excerpt'       => self::text($item['description'] ?? ''),
+                'excerpt'       => self::paragraphs($item['description'] ?? ''),
                 'thumbnail_url' => $thumbnailUrl,
                 'published_raw' => is_string($item['publishedDate'] ?? null) ? $item['publishedDate'] : '',
                 'episode'       => self::optionalNonNegativeInt($item, 'episode'),
@@ -144,6 +144,8 @@ final class ItemMapper
                 'position'      => $position,
                 'youtube_id'    => $videoId,
                 'podcast_guid'  => '',
+                'media_url'     => 'https://www.youtube.com/watch?v=' . rawurlencode($videoId),
+                'audio_url'     => '',
             ], $item);
 
             $position++;
@@ -174,14 +176,16 @@ final class ItemMapper
                 continue;
             }
 
-            $guid = XmlText::flatten($item['guid'] ?? '');
+            $guid  = XmlText::flatten($item['guid'] ?? '');
+            $audio = XmlText::enclosureUrl($item['enclosure'] ?? null);
+            $link  = esc_url_raw(XmlText::flatten($item['link'] ?? ''));
 
             $records[] = self::record([
                 'source_key'    => self::sourceKey('podcast', $playlistName, $kind, $rawId),
                 'source_id'     => $rawId,
                 'id_kind'       => $kind,
                 'title'         => self::text($item['title'] ?? ''),
-                'excerpt'       => self::text($item['description'] ?? ''),
+                'excerpt'       => self::paragraphs($item['description'] ?? ''),
                 'thumbnail_url' => self::podcastThumbnail($item),
                 'published_raw' => XmlText::flatten($item['pubDate'] ?? ''),
                 'episode'       => self::optionalNonNegativeInt($item, 'episode'),
@@ -189,6 +193,8 @@ final class ItemMapper
                 'position'      => $position,
                 'youtube_id'    => '',
                 'podcast_guid'  => $guid,
+                'media_url'     => $link !== '' ? $link : $audio,
+                'audio_url'     => $audio,
             ], $item);
 
             $position++;
@@ -342,10 +348,25 @@ final class ItemMapper
     {
         $idPart = preg_match(self::ID_SAFE, $rawId) === 1 ? $rawId : sha1($rawId);
 
-        return sanitize_key($mediaType)
-            . ':' . substr(sanitize_key($playlistName), 0, self::KEY_MAX_PLAYLIST)
-            . ':' . sanitize_key($kind)
+        return self::sourceKeyPrefix($mediaType, $playlistName)
+            . sanitize_key($kind)
             . ':' . $idPart;
+    }
+
+    /**
+     * Returns the prefix every source key of one playlist starts with.
+     *
+     * Synchronization only ever removes posts whose key carries this prefix,
+     * so a post belonging to another playlist or media type can never be
+     * matched — even if its meta were edited by hand.
+     *
+     * @param string $mediaType    'youtube' or 'podcast'.
+     * @param string $playlistName The playlist_name slug.
+     * @return string e.g. 'youtube:my_show:'.
+     */
+    public static function sourceKeyPrefix(string $mediaType, string $playlistName): string
+    {
+        return sanitize_key($mediaType) . ':' . substr(sanitize_key($playlistName), 0, self::KEY_MAX_PLAYLIST) . ':';
     }
 
     /**
@@ -490,6 +511,21 @@ final class ItemMapper
         $value = (int) $item[$key];
 
         return $value < 0 ? null : $value;
+    }
+
+    /**
+     * Flattens and sanitizes a description, keeping its line breaks.
+     *
+     * Descriptions are multi-line (YouTube descriptions especially), and the
+     * excerpt holds them verbatim apart from markup, so templates can show
+     * their paragraphs.
+     *
+     * @param mixed $value Raw field value.
+     * @return string Plain text with line breaks.
+     */
+    private static function paragraphs($value): string
+    {
+        return sanitize_textarea_field(XmlText::flatten($value));
     }
 
     /**

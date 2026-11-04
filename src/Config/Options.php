@@ -99,6 +99,115 @@ final class Options
     }
 
     /**
+     * Media item key: "Store playlist items as WordPress posts". Off unless a
+     * row explicitly stores true, so existing configurations stay disabled.
+     *
+     * @var string
+     */
+    public const ITEM_STORE_AS_POSTS = 'store_as_posts';
+
+    /**
+     * Returns every configured media item, including legacy constant rows.
+     *
+     * @return array<int, array<string,mixed>> Media item config arrays.
+     */
+    public static function getAllMediaItems(): array
+    {
+        $items = self::getMediaItems();
+
+        // Back-compat: if a theme/WPCode still defines MEDIA_CONTENT_DATA, merge it in.
+        if (defined('MEDIA_CONTENT_DATA') && is_array(constant('MEDIA_CONTENT_DATA'))) {
+            $items = array_merge($items, constant('MEDIA_CONTENT_DATA'));
+        }
+
+        return array_values(array_filter($items, 'is_array'));
+    }
+
+    /**
+     * Returns the media item config for a playlist, or null when not configured.
+     *
+     * @param string $playlistName Playlist slug.
+     * @param string $mediaType    'youtube' or 'podcast'.
+     * @return array<string,mixed>|null First matching row.
+     */
+    public static function findMediaItem(string $playlistName, string $mediaType): ?array
+    {
+        $playlistName = sanitize_key($playlistName);
+        $mediaType    = sanitize_key($mediaType);
+
+        foreach (self::getAllMediaItems() as $item) {
+            if (sanitize_key((string) ($item['playlist_name'] ?? '')) === $playlistName
+                && sanitize_key((string) ($item['type'] ?? '')) === $mediaType) {
+                return $item;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Returns whether a media item config row stores its items as posts.
+     *
+     * @param array<string,mixed> $item Media item config.
+     * @return bool True only for an explicit truthy value.
+     */
+    public static function rowStoresPosts(array $item): bool
+    {
+        $value = $item[self::ITEM_STORE_AS_POSTS] ?? false;
+
+        return $value === true || $value === 1 || $value === '1' || $value === 'true';
+    }
+
+    /**
+     * Returns whether post storage is enabled for a playlist.
+     *
+     * The single check every synchronization entry point uses — automatic,
+     * queued, manual and initial — so they can never disagree.
+     *
+     * @param string $playlistName Playlist slug.
+     * @param string $mediaType    'youtube' or 'podcast'.
+     * @return bool True when a configured row for the playlist enables it.
+     */
+    public static function isPostStorageEnabled(string $playlistName, string $mediaType): bool
+    {
+        $playlistName = sanitize_key($playlistName);
+        $mediaType    = sanitize_key($mediaType);
+
+        foreach (self::getAllMediaItems() as $item) {
+            if (sanitize_key((string) ($item['playlist_name'] ?? '')) === $playlistName
+                && sanitize_key((string) ($item['type'] ?? '')) === $mediaType
+                && self::rowStoresPosts($item)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Lists every playlist with post storage enabled.
+     *
+     * @return array<int, array{0:string,1:string}> Deduplicated [playlist_name, media_type] pairs.
+     */
+    public static function postStoragePlaylists(): array
+    {
+        $pairs = [];
+
+        foreach (self::getAllMediaItems() as $item) {
+            $type     = sanitize_key((string) ($item['type'] ?? ''));
+            $playlist = sanitize_key((string) ($item['playlist_name'] ?? ''));
+
+            if ($playlist === '' || !in_array($type, ['youtube', 'podcast'], true) || !self::rowStoresPosts($item)) {
+                continue;
+            }
+
+            $pairs[$type . '|' . $playlist] = [$playlist, $type];
+        }
+
+        return array_values($pairs);
+    }
+
+    /**
      * Retrieves the stored shortcode fields merged with the eight defaults.
      *
      * If the option does not exist yet, returns the default set. Otherwise,

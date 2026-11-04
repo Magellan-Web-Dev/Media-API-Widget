@@ -34,6 +34,27 @@
     if(wrap) wrap.style.display = toggle.checked ? '' : 'none';
   }
 
+  // Full-playlist post storage warning: shown for a YouTube row only while both
+  // "Load full playlist" and "Store playlist items as WordPress posts" are on.
+  function syncPostsWarning(row){
+    if(!row) return;
+    var warning = row.querySelector('[data-maw-posts-warning]');
+    if(!warning) return;
+    var typeSel = row.querySelector('[data-maw-type-select]');
+    var loadFull = row.querySelector('[data-maw-load-full]');
+    var store = row.querySelector('[data-maw-store-posts]');
+    var show = !!(typeSel && typeSel.value === 'youtube' && loadFull && loadFull.checked && !loadFull.disabled && store && store.checked);
+    warning.style.display = show ? '' : 'none';
+  }
+
+  // Podcast season/episode regex: reveal the pattern and sort mode while on.
+  function syncPodcastSeasonEpisode(toggle){
+    var box = toggle.closest('[data-maw-fields]');
+    if(!box) return;
+    var wrap = box.querySelector('[data-maw-pod-se-wrap]');
+    if(wrap) wrap.style.display = toggle.checked ? '' : 'none';
+  }
+
   function addRow(type){
     var tpl = qs('#maw-row-template');
     if(!tpl) return;
@@ -49,6 +70,9 @@
       if(sel) syncTypeForRow(sel);
       var sortSel = newRow.querySelector('[data-maw-sort-mode]');
       if(sortSel) syncSeasonEpisodeForRow(sortSel);
+      var podToggle = newRow.querySelector('[data-maw-pod-se-toggle]');
+      if(podToggle) syncPodcastSeasonEpisode(podToggle);
+      syncPostsWarning(newRow);
     }
   }
 
@@ -80,6 +104,11 @@
   }
 
   document.addEventListener('click', function(e){
+    var confirmLink = e.target.closest('[data-maw-confirm]');
+    if(confirmLink && !window.confirm(confirmLink.dataset.mawConfirm)){
+      e.preventDefault();
+      return;
+    }
     var add = e.target.closest('[data-maw-add]');
     if(add){
       e.preventDefault();
@@ -119,6 +148,13 @@
     if(seToggle){
       syncSeasonEpisodeRegex(seToggle);
     }
+    var podToggle = e.target.closest('[data-maw-pod-se-toggle]');
+    if(podToggle){
+      syncPodcastSeasonEpisode(podToggle);
+    }
+    if(e.target.closest('[data-maw-type-select], [data-maw-load-full], [data-maw-store-posts]')){
+      syncPostsWarning(e.target.closest('[data-maw-row]'));
+    }
   });
 
   // initial
@@ -130,4 +166,8 @@
   qsa('[data-maw-sort-mode]').forEach(function(sortSel){
     syncSeasonEpisodeForRow(sortSel);
   });
+  qsa('[data-maw-pod-se-toggle]').forEach(function(toggle){
+    syncPodcastSeasonEpisode(toggle);
+  });
+  qsa('[data-maw-row]').forEach(syncPostsWarning);
 })();

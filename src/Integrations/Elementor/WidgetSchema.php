@@ -81,8 +81,8 @@ final class WidgetSchema
     {
         return [
             self::MODE_ITEM              => __('Media card', 'media-api-widget'),
-            self::MODE_GRID              => __('Grid', 'media-api-widget'),
-            self::MODE_SEARCH_GRID       => __('Searchable grid with pagination', 'media-api-widget'),
+            self::MODE_GRID              => __('Grid or carousel', 'media-api-widget'),
+            self::MODE_SEARCH_GRID       => __('Searchable grid or carousel with pagination', 'media-api-widget'),
             self::MODE_SEARCH_BAR        => __('Search bar only', 'media-api-widget'),
             self::MODE_TITLE             => __('Title text', 'media-api-widget'),
             self::MODE_DESCRIPTION       => __('Description text', 'media-api-widget'),
@@ -105,7 +105,8 @@ final class WidgetSchema
             'card'       => __('Card Display', 'media-api-widget'),
             'text'       => __('Text Output', 'media-api-widget'),
             'lightbox'   => __('Lightbox', 'media-api-widget'),
-            'grid'       => __('Grid', 'media-api-widget'),
+            'grid'       => __('Grid & Carousel', 'media-api-widget'),
+            'carousel'   => __('Carousel Navigation', 'media-api-widget'),
             'search'     => __('Search & Pagination', 'media-api-widget'),
             'search_bar' => __('Search Bar', 'media-api-widget'),
             'podcast'    => __('Podcast Player Styling', 'media-api-widget'),
@@ -276,6 +277,11 @@ final class WidgetSchema
         $youtube = ['media_platform', 'eq', 'youtube'];
         $podcast = ['media_platform', 'eq', 'podcast'];
 
+        // Carousel-only controls show once the layout is set to Carousel or to
+        // a stored field (which may resolve to carousel); they stay hidden
+        // while the layout is Default or Grid, so they never reach a grid.
+        $carousel = ['multiplegridlayout', 'nin', [self::SOURCE_INHERIT, 'grid']];
+
         $lightboxStyling = [$cards, $youtube, ['showlightbox', 'ne', 'false'], ['lightboxshowplaylist', 'ne', 'false']];
         $cardPodcastPlayer = [$cards, $podcast, ['podcast_platform', 'nin', self::NON_CUSTOM_PODCAST_PLATFORMS]];
         $embeddedPlayer = [['output_mode', 'eq', self::MODE_PODCAST_PLAYER], $podcast];
@@ -334,7 +340,16 @@ final class WidgetSchema
             'lightboxfont' => self::spec('lightboxfont', 'text', 'lightbox', __('Lightbox font', 'media-api-widget'), $lightboxStyling),
             'lightboxthemecolor' => self::spec('lightboxthemecolor', 'color', 'lightbox', __('Playlist border color', 'media-api-widget'), $lightboxStyling),
 
-            // Grid.
+            // Grid & carousel. The layout applies to both collection modes.
+            'multiplegridlayout' => self::spec('multiplegridlayout', 'enum', 'grid', __('Layout', 'media-api-widget'), [$grids], [
+                'empty'   => false,
+                'hint'    => __('Grid', 'media-api-widget'),
+                'options' => [
+                    'grid'     => __('Grid', 'media-api-widget'),
+                    'carousel' => __('Carousel', 'media-api-widget'),
+                ],
+                'description' => __('Carousel shows the same cards in one horizontally scrolling row with arrows, swipe and drag. Gap and minimum item width size both layouts.', 'media-api-widget'),
+            ]),
             'multiplegridshowall' => self::spec('multiplegridshowall', 'bool', 'grid', __('Show every item (disable filters)', 'media-api-widget'), [$grids], ['hint' => __('No', 'media-api-widget')]),
             'multiplegridsearch' => self::spec('multiplegridsearch', 'text', 'grid', __('Title filter', 'media-api-widget'), [$grids, ['output_mode', 'eq', self::MODE_GRID], ['multiplegridshowall', 'ne', 'true']]),
             'multiplegridlimititems' => self::spec('multiplegridlimititems', 'number', 'grid', __('Limit items', 'media-api-widget'), [$grids, ['output_mode', 'eq', self::MODE_GRID], ['multiplegridshowall', 'ne', 'true']]),
@@ -343,7 +358,10 @@ final class WidgetSchema
                 'description' => __('Overrides the title filter and limit, as with the shortcode.', 'media-api-widget'),
             ]),
             'multiplegridgap' => self::spec('multiplegridgap', 'text', 'grid', __('Gap', 'media-api-widget'), [$grids], ['placeholder' => '48px']),
-            'multiplegridminsize' => self::spec('multiplegridminsize', 'text', 'grid', __('Minimum column width', 'media-api-widget'), [$grids], ['placeholder' => '400px']),
+            'multiplegridminsize' => self::spec('multiplegridminsize', 'text', 'grid', __('Minimum item width', 'media-api-widget'), [$grids], [
+                'placeholder' => '400px',
+                'description' => __('Grid: minimum column width. Carousel: cards never go narrower than this unless only one card fits, which then fills the width.', 'media-api-widget'),
+            ]),
             'multiplegridtext' => self::spec('multiplegridtext', 'enum', 'grid', __('Text below items', 'media-api-widget'), [$grids, $youtube], [
                 'options' => [
                     'title'                       => __('Title', 'media-api-widget'),
@@ -355,6 +373,31 @@ final class WidgetSchema
             ]),
             'grid_track' => self::spec('orderdescending', 'number', 'grid', __('Player start track', 'media-api-widget'), [$grids, $podcast], [
                 'description' => __('Shortcode orderdescending: for SoundCloud and Custom podcasts it sets the start track used by every card.', 'media-api-widget'),
+            ]),
+
+            // Carousel navigation.
+            'carouselstep' => self::spec('carouselstep', 'enum', 'carousel', __('Arrow step', 'media-api-widget'), [$grids, $carousel], [
+                'empty'   => false,
+                'hint'    => __('One item', 'media-api-widget'),
+                'options' => [
+                    'item'  => __('One item', 'media-api-widget'),
+                    'group' => __('Visible group', 'media-api-widget'),
+                ],
+                'description' => __('How far one arrow click moves. Searchable carousels: arrows move within the loaded result page; the pagination below loads other pages.', 'media-api-widget'),
+            ]),
+            'carouselarrowleftimgurl' => self::spec('carouselarrowleftimgurl', 'image', 'carousel', __('Left arrow image', 'media-api-widget'), [$grids, $carousel], [
+                'description' => __('Default uses the built-in arrow.', 'media-api-widget'),
+            ]),
+            'carouselarrowrightimgurl' => self::spec('carouselarrowrightimgurl', 'image', 'carousel', __('Right arrow image', 'media-api-widget'), [$grids, $carousel], [
+                'description' => __('Default uses the built-in arrow.', 'media-api-widget'),
+            ]),
+            'carouselarrowsize' => self::spec('carouselarrowsize', 'text', 'carousel', __('Arrow button size', 'media-api-widget'), [$grids, $carousel], ['placeholder' => '48px']),
+            'carouselarrowiconsize' => self::spec('carouselarrowiconsize', 'text', 'carousel', __('Arrow icon size', 'media-api-widget'), [$grids, $carousel], ['placeholder' => '24px']),
+            'carouselarrowcolor' => self::spec('carouselarrowcolor', 'color', 'carousel', __('Arrow color', 'media-api-widget'), [$grids, $carousel], ['hint' => '#ffffff']),
+            'carouselarrowbackground' => self::spec('carouselarrowbackground', 'color', 'carousel', __('Arrow background', 'media-api-widget'), [$grids, $carousel], ['hint' => 'rgba(0, 0, 0, 0.6)']),
+            'carouselarrowoffset' => self::spec('carouselarrowoffset', 'text', 'carousel', __('Arrow offset', 'media-api-widget'), [$grids, $carousel], [
+                'placeholder' => '12px',
+                'description' => __('Space between an arrow and the cards. On narrow containers the arrows overlay the cards, inset by this amount.', 'media-api-widget'),
             ]),
 
             // Search & pagination.

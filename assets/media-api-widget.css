@@ -720,3 +720,168 @@
             }
 
             /* -- END - Grid Search & Pagination -- */
+
+            /* -- START - Media Card Carousel -- */
+
+            /*
+             * Functional layout. These rules target data attributes, not
+             * classes, so they apply with or without nostyling: the carousel
+             * cannot scroll, size its cards, or place its arrows without them.
+             * The script sets --maw-carousel-item-width and
+             * --maw-carousel-gutter; before it runs (or without JavaScript)
+             * the row scrolls natively with cards at the minimum item width.
+             */
+            [data-maw-carousel] {
+                position: relative;
+                display: block;
+                box-sizing: border-box;
+                width: 100%;
+                max-width: 100%;
+                min-width: 0;
+                /* The row's width never feeds back into its container. */
+                contain: inline-size;
+                contain-intrinsic-inline-size: var(--maw-carousel-min, 400px);
+            }
+            [data-maw-carousel] > [data-maw-carousel-viewport] {
+                display: block;
+                box-sizing: border-box;
+                margin: 0 var(--maw-carousel-gutter, 0px);
+                overflow-x: auto;
+                overflow-y: hidden;
+                overscroll-behavior-x: contain;
+                scroll-snap-type: x mandatory;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+                -webkit-overflow-scrolling: touch;
+            }
+            [data-maw-carousel] > [data-maw-carousel-viewport]::-webkit-scrollbar {
+                display: none;
+            }
+            /*
+             * Focus rings are box-shadows so a site-wide outline reset cannot
+             * hide them; the transparent outline is what forced-colors (high
+             * contrast) modes draw instead.
+             */
+            [data-maw-carousel] > [data-maw-carousel-viewport]:focus-visible,
+            [data-maw-carousel] > [data-maw-carousel-arrow]:focus-visible {
+                outline: 2px solid transparent;
+                outline-offset: 2px;
+                box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #000000;
+            }
+            [data-maw-carousel] > [data-maw-carousel-viewport][data-maw-dragging] {
+                scroll-snap-type: none;
+                cursor: grabbing;
+                -webkit-user-select: none;
+                user-select: none;
+            }
+            [data-maw-carousel][data-maw-carousel-mode="gutter"] > [data-maw-carousel-viewport],
+            [data-maw-carousel][data-maw-carousel-mode="overlay"] > [data-maw-carousel-viewport] {
+                cursor: grab;
+            }
+            [data-maw-carousel-track] {
+                display: flex;
+                flex-wrap: nowrap;
+                gap: var(--maw-carousel-gap, 48px);
+                margin: 0;
+                padding: 0;
+            }
+            [data-maw-carousel-slide] {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr);
+                align-content: start;
+                flex: 0 0 var(--maw-carousel-item-width, min(100%, var(--maw-carousel-min, 400px)));
+                box-sizing: border-box;
+                min-width: 0;
+                max-width: 100%;
+                scroll-snap-align: start;
+            }
+            [data-maw-carousel] > [data-maw-carousel-arrow] {
+                position: absolute;
+                top: 50%;
+                z-index: 2;
+                box-sizing: border-box;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: var(--maw-carousel-arrow-size, 48px);
+                height: var(--maw-carousel-arrow-size, 48px);
+                min-width: 0;
+                min-height: 0;
+                margin: 0;
+                padding: 0;
+                line-height: 1;
+                transform: translateY(-50%);
+            }
+            [data-maw-carousel] > [data-maw-carousel-arrow][hidden] {
+                display: none !important;
+            }
+            [data-maw-carousel] > [data-maw-carousel-arrow="left"] {
+                left: var(--maw-carousel-arrow-offset, 12px);
+            }
+            [data-maw-carousel] > [data-maw-carousel-arrow="right"] {
+                right: var(--maw-carousel-arrow-offset, 12px);
+            }
+            /* Wide containers: arrows sit in gutters beside the cards. */
+            [data-maw-carousel][data-maw-carousel-mode="gutter"] > [data-maw-carousel-arrow="left"] {
+                left: 0;
+            }
+            [data-maw-carousel][data-maw-carousel-mode="gutter"] > [data-maw-carousel-arrow="right"] {
+                right: 0;
+            }
+            [data-maw-carousel] > [data-maw-carousel-arrow][aria-disabled="true"] {
+                cursor: default;
+            }
+            [data-maw-carousel] > [data-maw-carousel-arrow] > .maw-carousel-arrow-icon {
+                display: block;
+                flex: none;
+                width: var(--maw-carousel-arrow-icon-size, 24px);
+                height: var(--maw-carousel-arrow-icon-size, 24px);
+                max-width: 100%;
+                max-height: 100%;
+                object-fit: contain;
+                pointer-events: none;
+            }
+
+            /*
+             * Appearance. Applied through the media-carousel styling classes,
+             * which nostyling omits; the arrow color and background settings
+             * take effect through these rules. Selectors are doubled so theme
+             * and Elementor kit button styles do not override them.
+             */
+            .media-carousel .media-carousel-arrow {
+                border: 0;
+                border-radius: 50%;
+                background: var(--maw-carousel-arrow-background, rgba(0, 0, 0, 0.6));
+                color: var(--maw-carousel-arrow-color, #ffffff);
+                box-shadow: none;
+                cursor: pointer;
+                opacity: 1;
+                text-decoration: none;
+                transition: opacity 0.2s, transform 0.2s;
+            }
+            .media-carousel .media-carousel-arrow:hover,
+            .media-carousel .media-carousel-arrow:focus {
+                background: var(--maw-carousel-arrow-background, rgba(0, 0, 0, 0.6));
+                color: var(--maw-carousel-arrow-color, #ffffff);
+            }
+            .media-carousel .media-carousel-arrow:hover:not([aria-disabled="true"]) {
+                transform: translateY(-50%) scale(1.08);
+            }
+            .media-carousel .media-carousel-arrow[aria-disabled="true"] {
+                opacity: 0.35;
+                cursor: default;
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                [data-maw-carousel] > [data-maw-carousel-viewport] {
+                    scroll-behavior: auto;
+                }
+                .media-carousel .media-carousel-arrow {
+                    transition: none;
+                }
+                .media-carousel .media-carousel-arrow:hover:not([aria-disabled="true"]) {
+                    transform: translateY(-50%);
+                }
+            }
+
+            /* -- END - Media Card Carousel -- */

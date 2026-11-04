@@ -3,7 +3,6 @@
 namespace MediaApiWidget\PostIndex;
 
 use MediaApiWidget\Config\Options;
-use MediaApiWidget\Support\MediaStore;
 use MediaApiWidget\Support\OptionLock;
 
 if (!defined('ABSPATH')) { exit; }
@@ -14,8 +13,8 @@ if (!defined('ABSPATH')) { exit; }
  * Without this, a site upgrading to the index would see nothing in a page
  * builder until every playlist happened to refresh — up to a full media cache
  * TTL of waiting, and longer for a playlist inside its backup window. So on
- * first run the backfill schedules one synchronization per configured playlist,
- * working entirely from the transient and backup file. No external request is
+ * first run the backfill schedules one synchronization per playlist that has
+ * post storage enabled, working entirely from the transient and backup file. No external request is
  * made, and no API quota is consumed.
  *
  * It runs at most once per schema version. The version lives in its own option
@@ -150,50 +149,16 @@ final class Backfill
     }
 
     /**
-     * Lists every configured playlist as a [playlist_name, media_type] pair.
+     * Lists every playlist with post storage enabled, as [playlist_name, media_type].
      *
-     * Merges the legacy MEDIA_CONTENT_DATA constant, because
-     * Options::getMediaItems() returns the raw option and does not do this
-     * itself — omitting the merge would silently skip every playlist on a site
-     * still configured through a theme or a code snippet.
+     * Includes rows from the legacy MEDIA_CONTENT_DATA constant, deduplicated,
+     * and only those whose "Store playlist items as WordPress posts" setting is
+     * on — the same check every other synchronization entry point applies.
      *
      * @return array<int,array{0:string,1:string}> Deduplicated pairs.
      */
     public static function configuredPlaylists(): array
     {
-        $items = Options::getMediaItems();
-
-        // Back-compat: if a theme/WPCode still defines MEDIA_CONTENT_DATA, merge it in.
-        if (defined('MEDIA_CONTENT_DATA') && is_array(constant('MEDIA_CONTENT_DATA'))) {
-            $items = array_merge($items, constant('MEDIA_CONTENT_DATA'));
-        }
-
-        $pairs = [];
-
-        foreach ($items as $item) {
-            if (!is_array($item)) {
-                continue;
-            }
-
-            $mediaType = sanitize_key((string) ($item['type'] ?? ''));
-
-            if (!in_array($mediaType, MediaStore::SUPPORTED_MEDIA_TYPES, true)) {
-                continue;
-            }
-
-            // 'unnamed' matches the settings page's documented default for a
-            // media item saved with no playlist name.
-            $playlistName = sanitize_key((string) ($item['playlist_name'] ?? 'unnamed'));
-
-            if ($playlistName === '') {
-                continue;
-            }
-
-            // Keyed so a playlist configured twice — easy to do once the legacy
-            // constant is merged in — is scheduled and counted once.
-            $pairs[$mediaType . '|' . $playlistName] = [$playlistName, $mediaType];
-        }
-
-        return array_values($pairs);
+        return Options::postStoragePlaylists();
     }
 }

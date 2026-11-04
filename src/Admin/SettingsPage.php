@@ -2,6 +2,9 @@
 namespace MediaApiWidget\Admin;
 
 use MediaApiWidget\Config\Options;
+use MediaApiWidget\PostIndex\PostIndexAdmin;
+use MediaApiWidget\PostIndex\PostIndexSync;
+use MediaApiWidget\Support\PodcastNumbering;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -55,6 +58,10 @@ final class SettingsPage
         if (isset($_POST['maw_save'])) {
             $items = $this->sanitizeItems($_POST['maw_items'] ?? []);
             Options::setMediaItems($items);
+
+            // Post storage: queue initial population for newly enabled
+            // playlists; stop (and keep the posts of) disabled or removed ones.
+            PostIndexSync::applySettingsChange($existingItems, $items);
             $shortcodes = $this->sanitizeShortcodes($_POST['maw_shortcodes'] ?? []);
             Options::setShortcodes($shortcodes);
 
@@ -113,6 +120,7 @@ final class SettingsPage
             <?php if ($message) : ?>
                 <div class="notice <?= esc_attr($messageClass) ?> is-dismissible"><p><?= esc_html($message) ?></p></div>
             <?php endif; ?>
+            <?php PostIndexAdmin::renderNotice(); ?>
 
             <form method="post">
                 <?php wp_nonce_field('maw_save_settings', 'maw_nonce'); ?>
@@ -198,6 +206,9 @@ final class SettingsPage
         $seRegex         = $item['season_episode_regex'] ?? '';
         $loadFull        = !empty($item['load_full_playlist']);
         $podcastPlatform = $item['podcast_platform'] ?? 'custom';
+        $storePosts      = Options::rowStoresPosts($item);
+        $podSortMode     = PodcastNumbering::sortMode($item);
+        $showPostsWarn   = $type === 'youtube' && $loadFull && $storePosts;
 
         // Names are set server-side so saving works even if admin JS fails to load.
         // data-maw-name is used by JS to renumber indices when rows are added/removed.
@@ -242,7 +253,7 @@ final class SettingsPage
                         <p data-maw-se-regex-wrap="1"<?= $seRegexHidden ?>><label>Season/episode regex<br><input type="text" name="<?= esc_attr($nameBase . '[season_episode_regex]') ?>" data-maw-name="<?= esc_attr($dataBase . '[season_episode_regex]') ?>" value="<?= esc_attr($type === 'youtube' ? $seRegex : '') ?>" placeholder="S(\d+)E(\d+)" /></label>
                         <span class="description">Capture group 1 = season, group 2 = episode. Example: <code>S(\d+)E(\d+)</code> matches "TWCS5E14" as season 5 episode 14. Matched case-insensitively. Items are sorted by season then episode (descending). Titles that don't match fall back to episode-only numbering.</span></p>
                     </div>
-                    <p><label><input type="checkbox" name="<?= esc_attr($nameBase . '[load_full_playlist]') ?>" data-maw-name="<?= esc_attr($dataBase . '[load_full_playlist]') ?>" value="1" <?= ($type === 'youtube' && $loadFull) ? 'checked' : '' ?> /> Load full playlist (otherwise first 6)</label></p>
+                    <p><label><input type="checkbox" name="<?= esc_attr($nameBase . '[load_full_playlist]') ?>" data-maw-name="<?= esc_attr($dataBase . '[load_full_playlist]') ?>" data-maw-load-full="1" value="1" <?= ($type === 'youtube' && $loadFull) ? 'checked' : '' ?> /> Load full playlist (otherwise first 6)</label></p>
                 </div>
 
                 <div data-maw-fields="podcast"<?= $podStyle ?>>
@@ -254,6 +265,29 @@ final class SettingsPage
                     </select></label></p>
                     <p><label>RSS URL / ID / Embed URL (media_data)<br><input type="text" name="<?= esc_attr($nameBase . '[media_data]') ?>" data-maw-name="<?= esc_attr($dataBase . '[media_data]') ?>" value="<?= esc_attr($type === 'podcast' ? $mediaData : '') ?>"<?= $podDisabled ?> /></label></p>
                     <p class="description">For "Direct RSS URL", paste the RSS feed URL. For Omny/SoundCloud/Buzzsprout/Other, use the Apple podcast ID (numeric). For "Embed URL", paste the embed URL.</p>
+                    <?php $podSeEnabled = $type === 'podcast' && $seRegexEnabled; ?>
+                    <p><label><input type="checkbox" name="<?= esc_attr($nameBase . '[season_episode_regex_enabled]') ?>" data-maw-name="<?= esc_attr($dataBase . '[season_episode_regex_enabled]') ?>" value="1" data-maw-pod-se-toggle="1" <?= $podSeEnabled ? 'checked' : '' ?><?= $podDisabled ?> /> Use season/episode regex (parse season and episode numbers from episode titles)</label></p>
+                    <div data-maw-pod-se-wrap="1"<?= $podSeEnabled ? '' : ' style="display:none"' ?>>
+                        <p><label>Season/episode regex<br><input type="text" name="<?= esc_attr($nameBase . '[season_episode_regex]') ?>" data-maw-name="<?= esc_attr($dataBase . '[season_episode_regex]') ?>" value="<?= esc_attr($type === 'podcast' ? $seRegex : '') ?>" placeholder="S(\d+)E(\d+)"<?= $podDisabled ?> /></label>
+                        <span class="description">Matched case-insensitively. Two capture groups = season, episode (e.g. <code>S(\d+)E(\d+)</code>); one group = episode (e.g. <code>Episode (\d+)</code>); named groups <code>(?&lt;season&gt;…)</code> / <code>(?&lt;episode&gt;…)</code> also work. Titles that don't match are left unnumbered (season and episode blank).</span></p>
+                        <p><label>Sort mode<br><select name="<?= esc_attr($nameBase . '[podcast_sort_mode]') ?>" data-maw-name="<?= esc_attr($dataBase . '[podcast_sort_mode]') ?>"<?= $podDisabled ?>>
+                            <?php foreach ([PodcastNumbering::SORT_SEASON_EPISODE => 'Season / episode (newest first)', PodcastNumbering::SORT_FEED => 'Feed order'] as $v => $label) : ?>
+                                <option value="<?= esc_attr($v) ?>" <?= $podSortMode === $v ? 'selected' : '' ?>><?= esc_html($label) ?></option>
+                            <?php endforeach; ?>
+                        </select></label>
+                        <span class="description">Orders episodes everywhere the plugin lists them (cards, grids, carousels, and stored post positions). Players that pick an episode by its position in the original feed keep the feed's order.</span></p>
+                    </div>
+                </div>
+
+                <div class="maw-post-storage">
+                    <p><label><input type="checkbox" name="<?= esc_attr($nameBase . '[store_as_posts]') ?>" data-maw-name="<?= esc_attr($dataBase . '[store_as_posts]') ?>" data-maw-store-posts="1" value="1" <?= $storePosts ? 'checked' : '' ?> /> Store playlist items as WordPress posts</label><br>
+                    <span class="description">Creates one "Media Item" post per item for Elementor Loop Grid and other builders, kept in sync in the background.</span></p>
+                    <div class="notice notice-warning inline maw-posts-warning" data-maw-posts-warning="1"<?= $showPostsWarn ? '' : ' style="display:none"' ?>>
+                        <p>Storing a full playlist as WordPress posts can create many database records. Initial imports and refreshes may take time. Synchronization runs in the background; changed items are updated in place and removed source items are deleted after a successful complete refresh.</p>
+                    </div>
+                    <?php if (!$unSaved && is_numeric($index) && (string) $playlistName !== '') : ?>
+                        <?php PostIndexAdmin::renderStatus((string) $playlistName, $type); ?>
+                    <?php endif; ?>
                 </div>
             </td>
 
@@ -356,6 +390,10 @@ final class SettingsPage
                     : '',
                 'load_full_playlist' => !empty($item['load_full_playlist']),
                 'podcast_platform' => isset($item['podcast_platform']) ? sanitize_key((string) $item['podcast_platform']) : 'custom',
+                // Podcasts only: order applied when the season/episode regex is on.
+                'podcast_sort_mode' => PodcastNumbering::sortMode(['podcast_sort_mode' => sanitize_key((string) ($item['podcast_sort_mode'] ?? ''))]),
+                // Off unless the box was ticked, for new and existing rows alike.
+                Options::ITEM_STORE_AS_POSTS => !empty($item['store_as_posts']),
             ];
 
             // Basic required fields (still allow saving, but front-end will error-log like before).

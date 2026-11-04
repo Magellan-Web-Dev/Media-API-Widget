@@ -200,3 +200,90 @@ if (!function_exists('media_api_widget_get_stored_data')) {
         return MediaStore::readStored($playlistName, $mediaType);
     }
 }
+
+if (!function_exists('media_api_widget_rebuild_post_index')) {
+    /**
+     * Queues a full resynchronization of stored playlist posts.
+     *
+     * Only playlists with "Store playlist items as WordPress posts" enabled are
+     * resynchronized. Work runs in the background in bounded batches; nothing is
+     * written during this call and no external request is made. A resync adds
+     * and updates posts from the currently stored data; posts for items missing
+     * from the source are removed only on the strength of a complete refresh.
+     *
+     * - No arguments: every enabled playlist.
+     * - A media type only: every enabled playlist of that type.
+     * - A playlist name (optionally with its type): that playlist.
+     *
+     * Error codes: `maw_post_index_unregistered` (called before `init`),
+     * `maw_unsupported_media_type`, `maw_invalid_playlist_name`,
+     * `maw_unknown_playlist`, `maw_post_storage_disabled`.
+     *
+     * @param string|null $playlistName Playlist slug, or null for all.
+     * @param string|null $mediaType    'youtube', 'podcast', or null for any.
+     * @return array{ok:bool,scheduled:int,failed:int,playlists:array<int,array{playlist_name:string,media_type:string}>}|\WP_Error
+     */
+    function media_api_widget_rebuild_post_index(?string $playlistName = null, ?string $mediaType = null)
+    {
+        if (!MediaApiWidget\PostIndex\PostIndex::isRegistered()) {
+            return new WP_Error(
+                'maw_post_index_unregistered',
+                'The media item post type is not registered yet. Call this on or after the init action.'
+            );
+        }
+
+        if ($mediaType !== null) {
+            $mediaType = sanitize_key($mediaType);
+            if (!in_array($mediaType, MediaStore::SUPPORTED_MEDIA_TYPES, true)) {
+                return new WP_Error('maw_unsupported_media_type', 'Unsupported media type. Expected youtube or podcast.');
+            }
+        }
+
+        $pairs = Options::postStoragePlaylists();
+
+        if ($playlistName !== null) {
+            $playlistName = sanitize_key($playlistName);
+            if ($playlistName === '') {
+                return new WP_Error('maw_invalid_playlist_name', 'A usable playlist name is required.');
+            }
+
+            $configured = false;
+            foreach (Options::getAllMediaItems() as $item) {
+                if (sanitize_key((string) ($item['playlist_name'] ?? '')) === $playlistName
+                    && ($mediaType === null || sanitize_key((string) ($item['type'] ?? '')) === $mediaType)) {
+                    $configured = true;
+                }
+            }
+
+            $pairs = array_values(array_filter(
+                $pairs,
+                static fn (array $pair): bool => $pair[0] === $playlistName && ($mediaType === null || $pair[1] === $mediaType)
+            ));
+
+            if ($pairs === []) {
+                return $configured || $mediaType !== null
+                    ? new WP_Error('maw_post_storage_disabled', 'Post storage is not enabled for this playlist.')
+                    : new WP_Error('maw_unknown_playlist', 'No configured playlist has that name.');
+            }
+        } elseif ($mediaType !== null) {
+            $pairs = array_values(array_filter($pairs, static fn (array $pair): bool => $pair[1] === $mediaType));
+        }
+
+        $summary = ['ok' => true, 'scheduled' => 0, 'failed' => 0, 'playlists' => []];
+
+        foreach ($pairs as [$name, $type]) {
+            $queued = MediaApiWidget\PostIndex\PostIndexSync::requestResync($name, $type, 'Rebuild queued.');
+
+            if ($queued === true) {
+                $summary['scheduled']++;
+                $summary['playlists'][] = ['playlist_name' => $name, 'media_type' => $type];
+            } else {
+                $summary['failed']++;
+            }
+        }
+
+        $summary['ok'] = $summary['failed'] === 0;
+
+        return $summary;
+    }
+}

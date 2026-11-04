@@ -109,6 +109,9 @@ function maw_test_reset(): void
     MawTestState::$failTransientWrites        = false;
     MawTestState::$transientWriteReturnsFalse = false;
 
+    // Posts, meta, terms, cron, and capability/nonce state (support/wp-posts.php).
+    MawTestPosts::reset();
+
     $wpdb->reset();
 
     // Backup JSON files are written for real, into a temp directory, so the
@@ -681,7 +684,12 @@ function sanitize_key(string $key): string
  */
 function sanitize_text_field(string $text): string
 {
-    return trim(strip_tags((string) preg_replace('/[\r\n\t ]+/', ' ', $text)));
+    // Like core: tags stripped, whitespace runs collapsed, and the remaining
+    // control characters removed. (The post double in support/wp-posts.php
+    // relies on this one rather than declaring its own.)
+    $clean = trim(strip_tags((string) preg_replace('/[\r\n\t ]+/', ' ', $text)));
+
+    return (string) preg_replace('/[\x00-\x1F\x7F]/u', '', $clean);
 }
 
 /**
@@ -964,3 +972,8 @@ require_once dirname(__DIR__) . '/src/functions.php';
 // referenced; the HTTP double above intercepts wp_safe_remote_get, and the log
 // table is replaced by a lightweight recorder in tests/support/overrides.php.
 require_once __DIR__ . '/support/helpers.php';
+
+// Post, meta, term, cron, and admin-request doubles for the media post index,
+// and the helpers its cases share.
+require_once __DIR__ . '/support/wp-posts.php';
+require_once __DIR__ . '/support/post-index.php';

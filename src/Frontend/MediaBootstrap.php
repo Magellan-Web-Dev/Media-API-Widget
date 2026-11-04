@@ -117,6 +117,7 @@ final class MediaBootstrap
                 'sort_mode'        => $item['sort_mode'] ?? 'normal',
                 'season_episode_regex_enabled' => $item['season_episode_regex_enabled'] ?? false,
                 'season_episode_regex' => $item['season_episode_regex'] ?? '',
+                'podcast_sort_mode' => $item['podcast_sort_mode'] ?? 'season_episode',
                 'load_full_playlist' => $item['load_full_playlist'] ?? false,
                 'cookie_name'      => $cookieName,
                 'cookie_expired'   => $cookieExpired,

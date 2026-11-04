@@ -55,12 +55,19 @@ function maw_mpi_youtube_key(string $videoId = 'vid00001', string $playlist = 't
 /**
  * Stores a playlist config so the backfill and rebuild can discover it.
  *
- * @param array<int,array<string,string>> $items Media item config rows.
+ * Rows store their items as posts unless they say otherwise, because post
+ * storage is opt-in per playlist and these cases are about what happens once
+ * it is on.
+ *
+ * @param array<int,array<string,mixed>> $items Media item config rows.
  * @return void
  */
 function maw_mpi_configure(array $items): void
 {
-    MediaApiWidget\Config\Options::setMediaItems($items);
+    MediaApiWidget\Config\Options::setMediaItems(array_map(
+        static fn (array $item): array => $item + ['store_as_posts' => true],
+        $items
+    ));
 }
 
 return [
@@ -138,6 +145,7 @@ return [
         }
 
         maw_assert_same('integer', $registered[PostIndex::META_EPISODE]['type'], 'episode is an integer');
+
         maw_assert_same('integer', $registered[PostIndex::META_LAST_SEEN]['type'], 'last seen is an integer');
         maw_assert_same('string', $registered[PostIndex::META_YOUTUBE_ID]['type'], 'the video id is a string');
 
@@ -433,6 +441,7 @@ return [
         maw_assert_same('Body.', $item['description'], 'a CDATA description survives');
 
         maw_mpi_register_types();
+        maw_mpi_enable('testpod', 'podcast');
         maw_mpi_sync('testpod', 'podcast');
 
         $post = maw_mpi_posts()[0];
@@ -1027,6 +1036,7 @@ return [
 
     'a sync with no stored data reports it and writes nothing' => static function (): void {
         maw_mpi_register_types();
+        maw_mpi_enable('nothingstored');
 
         $result = maw_mpi_sync('nothingstored');
 
@@ -1067,7 +1077,7 @@ return [
     // Missing items
     // -----------------------------------------------------------------------
 
-    'an item missing from a later payload is neither deleted nor trashed' => static function (): void {
+    'without a recorded complete refresh, an item missing from a later payload is kept' => static function (): void {
         maw_mpi_register_types();
         maw_mpi_seed_youtube('testshow', [
             maw_mpi_youtube_item(['id' => 'vidkeep', 'title' => 'Kept']),
@@ -1118,12 +1128,13 @@ return [
             ['type' => 'youtube', 'playlist_name' => 'showone'],
             ['type' => 'podcast', 'playlist_name' => 'podone'],
             ['type' => 'vimeo', 'playlist_name' => 'ignored'],
+            ['type' => 'youtube', 'playlist_name' => 'notstored', 'store_as_posts' => false],
         ]);
 
         $summary = Backfill::run();
 
         maw_assert_same(true, $summary['ok'], 'the backfill succeeds');
-        maw_assert_same(2, $summary['scheduled'], 'only supported media types are scheduled');
+        maw_assert_same(2, $summary['scheduled'], 'only supported media types with post storage on are scheduled');
         maw_assert_same(2, count(maw_mpi_cron_events()), 'one event per configured playlist');
         maw_assert_same(
             PostIndex::SCHEMA_VERSION,
@@ -1226,16 +1237,17 @@ return [
         );
     },
 
-    'an unconfigured playlist can still be rebuilt with an explicit type' => static function (): void {
+    'a playlist without post storage cannot be rebuilt, configured or not' => static function (): void {
         maw_mpi_register_types();
-        maw_mpi_configure([]);
+        maw_mpi_configure([['type' => 'youtube', 'playlist_name' => 'offshow', 'store_as_posts' => false]]);
 
-        // Stored data outlives its config row, so re-indexing a just-removed
-        // playlist is a legitimate request.
-        $result = media_api_widget_rebuild_post_index('orphanshow', 'youtube');
+        $disabled = media_api_widget_rebuild_post_index('offshow');
+        maw_assert_same('maw_post_storage_disabled', is_wp_error($disabled) ? $disabled->get_error_code() : '', 'a configured playlist with storage off is refused');
 
-        maw_assert_same(false, is_wp_error($result), 'the request is accepted');
-        maw_assert_same(1, $result['scheduled'], 'the explicit pair is queued');
+        // A removed configuration keeps its posts but is no longer synchronized.
+        $removed = media_api_widget_rebuild_post_index('orphanshow', 'youtube');
+        maw_assert_same('maw_post_storage_disabled', is_wp_error($removed) ? $removed->get_error_code() : '', 'a removed playlist is refused even with an explicit type');
+        maw_assert_same(0, count(maw_mpi_cron_events()), 'nothing is queued');
     },
 
     // -----------------------------------------------------------------------

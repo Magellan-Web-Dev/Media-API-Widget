@@ -2,8 +2,11 @@
 namespace MediaApiWidget\Frontend;
 
 use MediaApiWidget\Config\Options;
+use MediaApiWidget\PostIndex\RefreshManifest;
 use MediaApiWidget\Support\MediaStore;
+use MediaApiWidget\Support\PodcastNumbering;
 use MediaApiWidget\Support\SafeRemoteRequest;
+use MediaApiWidget\Support\XmlText;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -24,6 +27,26 @@ if (!defined('ABSPATH')) { exit; }
  */
 final class Shortcode
 {
+    /** Collection layout values accepted by `multiplegridlayout`. */
+    public const LAYOUT_GRID     = 'grid';
+    public const LAYOUT_CAROUSEL = 'carousel';
+
+    /**
+     * Carousel attribute defaults.
+     *
+     * Also the safe fallbacks used when a supplied value is invalid or unusable.
+     * `multiplegridgap` and `multiplegridminsize` keep their existing shortcode
+     * defaults (48px / 400px), which the carousel reuses.
+     */
+    public const CAROUSEL_DEFAULTS = [
+        'carouselstep'            => 'item',
+        'carouselarrowsize'       => '48px',
+        'carouselarrowiconsize'   => '24px',
+        'carouselarrowcolor'      => '#ffffff',
+        'carouselarrowbackground' => 'rgba(0, 0, 0, 0.6)',
+        'carouselarrowoffset'     => '12px',
+    ];
+
     /**
      * Registers all four shortcodes with WordPress.
      *
@@ -87,6 +110,8 @@ final class Shortcode
      * - `mediatitle` / `mediadescription` — returns a plain `<p>` text block.
      * - `multiplegrid="true"` with more than one item — returns a CSS grid of
      *   media item cards, with optional search, limit, and episode-range filters.
+     *   With `multiplegridlayout="carousel"` the same cards are returned in a
+     *   horizontally scrolling carousel instead (also for a single item).
      * - Single item — returns one media item card resolved by episode number,
      *   name substring, or orderdescending index.
      *
@@ -142,6 +167,15 @@ final class Shortcode
             'multiplegridperpage' => '12',
             'multiplegridmaxpages' => '',
             'multiplegridmaxpagedisplay' => '',
+            'multiplegridlayout' => self::LAYOUT_GRID,
+            'carouselstep' => self::CAROUSEL_DEFAULTS['carouselstep'],
+            'carouselarrowleftimgurl' => '',
+            'carouselarrowrightimgurl' => '',
+            'carouselarrowsize' => self::CAROUSEL_DEFAULTS['carouselarrowsize'],
+            'carouselarrowiconsize' => self::CAROUSEL_DEFAULTS['carouselarrowiconsize'],
+            'carouselarrowcolor' => self::CAROUSEL_DEFAULTS['carouselarrowcolor'],
+            'carouselarrowbackground' => self::CAROUSEL_DEFAULTS['carouselarrowbackground'],
+            'carouselarrowoffset' => self::CAROUSEL_DEFAULTS['carouselarrowoffset'],
             'nostyling' => 'false',
             'noresults' => '',
             'podcastplayermode' => '',
@@ -218,6 +252,15 @@ final class Shortcode
             'multiplegridperpage' => max(1, (int) ($atts['multiplegridperpage'] ?: 12)),
             'multiplegridmaxpages' => (int) ($atts['multiplegridmaxpages'] ?? 0) > 0 ? (int) $atts['multiplegridmaxpages'] : 0,
             'multiplegridmaxpagedisplay' => (int) ($atts['multiplegridmaxpagedisplay'] ?? 0) > 0 ? (int) $atts['multiplegridmaxpagedisplay'] : 0,
+            'multiplegridlayout' => $this->sanitizeCollectionLayout((string) $atts['multiplegridlayout']),
+            'carouselstep' => (string) $atts['carouselstep'],
+            'carouselarrowleftimgurl' => (string) $atts['carouselarrowleftimgurl'],
+            'carouselarrowrightimgurl' => (string) $atts['carouselarrowrightimgurl'],
+            'carouselarrowsize' => (string) $atts['carouselarrowsize'],
+            'carouselarrowiconsize' => (string) $atts['carouselarrowiconsize'],
+            'carouselarrowcolor' => (string) $atts['carouselarrowcolor'],
+            'carouselarrowbackground' => (string) $atts['carouselarrowbackground'],
+            'carouselarrowoffset' => (string) $atts['carouselarrowoffset'],
             'nostyling' => $this->isTruthy((string) $atts['nostyling']),
             'noresults' => sanitize_text_field((string) $atts['noresults']),
             'podcastplayermode' => (string) $atts['podcastplayermode'],
@@ -262,7 +305,12 @@ final class Shortcode
             return $this->renderUserSearchGrid($renderData, $itemData, $settings, $playlistName, $mediaType);
         }
 
-        if ($itemData['multiplegrid'] && count($renderData) > 1) {
+        // A grid has always required more than one source item (a one-item
+        // playlist falls through to the single-card path below). A carousel
+        // renders as a carousel for a single item too, so its markup, sizing
+        // and hooks do not change when a playlist shrinks to one entry.
+        $isCarousel = $itemData['multiplegridlayout'] === self::LAYOUT_CAROUSEL;
+        if ($itemData['multiplegrid'] && (count($renderData) > 1 || ($isCarousel && count($renderData) === 1))) {
             $renderGridData = $renderData;
 
             if (!$itemData['multiplegridshowall']) {
@@ -292,18 +340,17 @@ final class Shortcode
             }
 
             $settings = $this->buildRenderSettings($itemData, $mediaType);
-            $gridHtml = '';
+            $cards = [];
             foreach ($renderGridData as $row) {
                 $gridSettings = $settings;
                 if ($itemData['multiplegridtext'] !== '') {
                     $gridSettings['multipleGridText'] = (string) $itemData['multiplegridtext'];
                 }
 
-                $gridHtml .= $this->renderMediaItem($row, $gridSettings, false, $playlistName, $mediaType);
+                $cards[] = $this->renderMediaItem($row, $gridSettings, false, $playlistName, $mediaType);
             }
 
-            $gridClass = $this->classAttr('maw-media-items-grid-layout', $itemData['nostyling'] ? '' : 'media_items_multiple_grid_layout');
-            return '<div' . $gridClass . ' style="gap: ' . esc_attr($itemData['multiplegridgap']) . '; grid-template-columns: repeat(auto-fill, minmax(min(100%, ' . esc_attr($itemData['multiplegridminsize']) . '), 1fr));">' . $gridHtml . '</div>';
+            return $this->renderCollection($cards, $this->buildCollectionLayout($itemData), (bool) $itemData['nostyling']);
         }
 
         $index = $this->resolveIndex($renderData, $itemData, $mediaType, $podcastPlatform);
@@ -540,10 +587,13 @@ final class Shortcode
             return null;
         }
 
-        $xml = @simplexml_load_string((string) wp_remote_retrieve_body($rssRes));
+        $xml = @simplexml_load_string((string) wp_remote_retrieve_body($rssRes), 'SimpleXMLElement', XmlText::RSS_PARSE_OPTIONS);
         if ($xml === false) {
             return null;
         }
+
+        // Keep CDATA text and attributed GUIDs through the JSON conversion.
+        XmlText::normalizeFeedItems($xml);
 
         $parsed = json_decode((string) wp_json_encode($xml), true);
         if (!is_array($parsed)) {
@@ -581,12 +631,17 @@ final class Shortcode
         // Persist through the shared store rather than writing the transient
         // directly, so this path cannot bypass the developer hooks, the backup
         // file, or the configured cache TTL.
+        // Optional season/episode numbering, exactly as the wp_head refresh applies it.
+        $parsed = PodcastNumbering::apply($parsed, $mediaConfig);
+
         $store = MediaStore::store(
             MediaStore::buildContext($playlistName, 'podcast', MediaStore::SOURCE_SHORTCODE_WARMUP, $platform),
             $parsed,
             [
                 'ttl'          => (int) (Options::getCacheExpirations()['media_cache_ttl'] ?? 7200),
                 'write_backup' => true,
+                // A complete feed fetch: its membership may authorize post removal.
+                'after_write'  => RefreshManifest::afterWriteCallback($playlistName, 'podcast', $parsed),
             ]
         );
 
@@ -1220,6 +1275,277 @@ final class Shortcode
     }
 
     /**
+     * Normalizes the multiplegridlayout attribute value.
+     *
+     * Only `carousel` selects the carousel; every other value — including an
+     * empty or unknown one — keeps the grid, so existing content is unchanged.
+     *
+     * @param string $value Raw attribute value.
+     * @return string self::LAYOUT_CAROUSEL or self::LAYOUT_GRID.
+     */
+    private function sanitizeCollectionLayout(string $value): string
+    {
+        return strtolower(trim($value)) === self::LAYOUT_CAROUSEL ? self::LAYOUT_CAROUSEL : self::LAYOUT_GRID;
+    }
+
+    /**
+     * Builds the layout description shared by every collection render path.
+     *
+     * A grid keeps `multiplegridgap` / `multiplegridminsize` exactly as given,
+     * because the grid has always passed them through to its inline style. A
+     * carousel resolves them (and its own settings) to validated values.
+     *
+     * @param array<string,mixed> $itemData Resolved shortcode item options.
+     * @return array<string,string> Layout description.
+     */
+    private function buildCollectionLayout(array $itemData): array
+    {
+        if (($itemData['multiplegridlayout'] ?? self::LAYOUT_GRID) !== self::LAYOUT_CAROUSEL) {
+            return [
+                'layout'  => self::LAYOUT_GRID,
+                'gap'     => (string) $itemData['multiplegridgap'],
+                'minsize' => (string) $itemData['multiplegridminsize'],
+            ];
+        }
+
+        return $this->normalizeCarouselConfig([
+            'gap'             => (string) $itemData['multiplegridgap'],
+            'minsize'         => (string) $itemData['multiplegridminsize'],
+            'step'            => (string) ($itemData['carouselstep'] ?? ''),
+            'arrowleft'       => (string) ($itemData['carouselarrowleftimgurl'] ?? ''),
+            'arrowright'      => (string) ($itemData['carouselarrowrightimgurl'] ?? ''),
+            'arrowsize'       => (string) ($itemData['carouselarrowsize'] ?? ''),
+            'arrowiconsize'   => (string) ($itemData['carouselarrowiconsize'] ?? ''),
+            'arrowcolor'      => (string) ($itemData['carouselarrowcolor'] ?? ''),
+            'arrowbackground' => (string) ($itemData['carouselarrowbackground'] ?? ''),
+            'arrowoffset'     => (string) ($itemData['carouselarrowoffset'] ?? ''),
+        ]);
+    }
+
+    /**
+     * Validates a carousel configuration, substituting defaults for bad values.
+     *
+     * Used when a carousel is first rendered and again when a stored searchable
+     * carousel configuration is read back for an AJAX response, so both paths
+     * render from identical, safe values.
+     *
+     * @param array<string,mixed> $raw Unvalidated configuration.
+     * @return array<string,string> Validated carousel layout description.
+     */
+    private function normalizeCarouselConfig(array $raw): array
+    {
+        $text = static fn(string $key): string => is_scalar($raw[$key] ?? null) ? trim((string) $raw[$key]) : '';
+
+        return [
+            'layout'          => self::LAYOUT_CAROUSEL,
+            'gap'             => $this->sanitizeCssLength($text('gap'), '48px', true),
+            'minsize'         => $this->sanitizeCssLength($text('minsize'), '400px', false),
+            'step'            => strtolower($text('step')) === 'group' ? 'group' : 'item',
+            'arrowleft'       => $text('arrowleft'),
+            'arrowright'      => $text('arrowright'),
+            'arrowsize'       => $this->sanitizeCssLength($text('arrowsize'), self::CAROUSEL_DEFAULTS['carouselarrowsize'], false),
+            'arrowiconsize'   => $this->sanitizeCssLength($text('arrowiconsize'), self::CAROUSEL_DEFAULTS['carouselarrowiconsize'], false),
+            'arrowcolor'      => $this->sanitizeCssColor($text('arrowcolor'), self::CAROUSEL_DEFAULTS['carouselarrowcolor']),
+            'arrowbackground' => $this->sanitizeCssColor($text('arrowbackground'), self::CAROUSEL_DEFAULTS['carouselarrowbackground']),
+            'arrowoffset'     => $this->sanitizeCssLength($text('arrowoffset'), self::CAROUSEL_DEFAULTS['carouselarrowoffset'], true),
+        ];
+    }
+
+    /**
+     * Wraps rendered media cards in the collection's layout.
+     *
+     * The grid branch produces exactly the markup every grid path produced
+     * before carousel support, including placing an empty-state message inside
+     * the grid container. A carousel with no cards returns the message alone,
+     * without carousel controls.
+     *
+     * @param array<int,string>    $cards     Card HTML from renderMediaItem(), in order.
+     * @param array<string,string> $layout    From buildCollectionLayout() / normalizeCarouselConfig().
+     * @param bool                 $noStyling Whether nostyling is in effect.
+     * @param string               $emptyHtml Markup shown when there are no cards.
+     * @return string Collection HTML.
+     */
+    private function renderCollection(array $cards, array $layout, bool $noStyling, string $emptyHtml = ''): string
+    {
+        if (($layout['layout'] ?? self::LAYOUT_GRID) === self::LAYOUT_CAROUSEL) {
+            return $cards === [] ? $emptyHtml : $this->renderCarousel($cards, $layout, $noStyling);
+        }
+
+        $gridClass = $this->classAttr('maw-media-items-grid-layout', $noStyling ? '' : 'media_items_multiple_grid_layout');
+
+        return '<div' . $gridClass . ' style="gap: ' . esc_attr((string) $layout['gap']) . '; grid-template-columns: repeat(auto-fill, minmax(min(100%, ' . esc_attr((string) $layout['minsize']) . '), 1fr));">'
+            . ($cards === [] ? $emptyHtml : implode('', $cards))
+            . '</div>';
+    }
+
+    /**
+     * Renders media cards as a carousel.
+     *
+     * Each card is the unchanged output of renderMediaItem(), wrapped in a
+     * slide element — cards are never cloned. Structure and behavior are
+     * carried by `data-maw-carousel*` attributes, which the functional CSS and
+     * the front-end script target and which nostyling leaves in place. The
+     * `media-carousel*` styling classes carry only the arrow appearance and are
+     * omitted with nostyling; the `maw-carousel*` hook classes carry no plugin
+     * CSS, like every other `maw-` hook class.
+     *
+     * The arrows are rendered hidden: the script reveals them only when some
+     * cards do not fit, so without JavaScript the row simply scrolls natively.
+     *
+     * @param array<int,string>    $cards     Card HTML, in order (at least one).
+     * @param array<string,string> $layout    Validated carousel layout.
+     * @param bool                 $noStyling Whether nostyling is in effect.
+     * @return string Carousel HTML.
+     */
+    private function renderCarousel(array $cards, array $layout, bool $noStyling): string
+    {
+        $total  = count($cards);
+        $slides = '';
+
+        foreach (array_values($cards) as $i => $card) {
+            $slides .=
+                '<div class="maw-carousel-slide" data-maw-carousel-slide="" role="group" aria-roledescription="' . esc_attr__('slide', 'media-api-widget') . '"'
+                    . ' aria-label="' . esc_attr(sprintf(
+                        /* translators: 1: slide number, 2: total number of slides. */
+                        __('%1$d of %2$d', 'media-api-widget'),
+                        $i + 1,
+                        $total
+                    )) . '">' .
+                    $card .
+                '</div>';
+        }
+
+        $style =
+            '--maw-carousel-gap: ' . $layout['gap'] . ';' .
+            ' --maw-carousel-min: ' . $layout['minsize'] . ';' .
+            ' --maw-carousel-arrow-size: ' . $layout['arrowsize'] . ';' .
+            ' --maw-carousel-arrow-icon-size: ' . $layout['arrowiconsize'] . ';' .
+            ' --maw-carousel-arrow-offset: ' . $layout['arrowoffset'] . ';' .
+            ' --maw-carousel-arrow-color: ' . $layout['arrowcolor'] . ';' .
+            ' --maw-carousel-arrow-background: ' . $layout['arrowbackground'] . ';';
+
+        $group = $layout['step'] === 'group';
+
+        return
+            '<div' . $this->classAttr('maw-carousel', $noStyling ? '' : 'media-carousel') .
+                ' data-maw-carousel=""' .
+                ' data-maw-carousel-step="' . esc_attr($layout['step']) . '"' .
+                ' style="' . esc_attr($style) . '"' .
+            '>' .
+                $this->renderCarouselArrow('left', $group ? __('Previous items', 'media-api-widget') : __('Previous item', 'media-api-widget'), $layout['arrowleft'], $noStyling) .
+                '<div class="maw-carousel-viewport" data-maw-carousel-viewport="" role="group" aria-roledescription="' . esc_attr__('carousel', 'media-api-widget') . '" aria-label="' . esc_attr__('Media items', 'media-api-widget') . '" tabindex="0">' .
+                    '<div class="maw-carousel-track" data-maw-carousel-track="">' . $slides . '</div>' .
+                '</div>' .
+                $this->renderCarouselArrow('right', $group ? __('Next items', 'media-api-widget') : __('Next item', 'media-api-widget'), $layout['arrowright'], $noStyling) .
+            '</div>';
+    }
+
+    /**
+     * Renders one carousel arrow button.
+     *
+     * A custom image replaces the built-in chevron for that direction only.
+     * The image is decorative (empty alt): the button's own label names it.
+     *
+     * @param string $side      'left' or 'right'.
+     * @param string $label     Accessible button label.
+     * @param string $imageUrl  Custom arrow image URL, or '' for the built-in arrow.
+     * @param bool   $noStyling Whether nostyling is in effect.
+     * @return string Button HTML.
+     */
+    private function renderCarouselArrow(string $side, string $label, string $imageUrl, bool $noStyling): string
+    {
+        $imageUrl = trim($imageUrl) !== '' ? esc_url($imageUrl) : '';
+
+        if ($imageUrl !== '') {
+            $icon = '<img class="maw-carousel-arrow-icon" src="' . $imageUrl . '" alt="" draggable="false">';
+        } else {
+            $path = $side === 'left' ? 'M15 5l-7 7 7 7' : 'M9 5l7 7-7 7';
+            $icon = '<svg class="maw-carousel-arrow-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">'
+                . '<path d="' . $path . '" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path>'
+                . '</svg>';
+        }
+
+        return
+            '<button type="button"' . $this->classAttr('maw-carousel-arrow maw-carousel-arrow-' . $side, $noStyling ? '' : 'media-carousel-arrow') .
+                ' data-maw-carousel-arrow="' . esc_attr($side) . '"' .
+                ' aria-label="' . esc_attr($label) . '"' .
+                ' hidden' .
+            '>' . $icon . '</button>';
+    }
+
+    /**
+     * Validates a CSS length for carousel sizing.
+     *
+     * Accepts a non-negative number with an absolute, font-relative, viewport,
+     * container or percentage unit (px, rem, em, %, vw, …), a bare number
+     * (read as pixels), or a calc() / min() / max() / clamp() expression made
+     * only of numbers, units and arithmetic. Anything else — including values
+     * that could break out of the inline style — yields the default.
+     *
+     * @param string $value     Raw value.
+     * @param string $default   Fallback length.
+     * @param bool   $allowZero Whether zero is a usable value.
+     * @return string Validated CSS length.
+     */
+    private function sanitizeCssLength(string $value, string $default, bool $allowZero): string
+    {
+        $v = strtolower(trim($value));
+        if ($v === '' || strlen($v) > 120) {
+            return $default;
+        }
+
+        if (preg_match('/^\d*\.?\d+$/', $v) === 1) {
+            $v .= 'px';
+        }
+
+        $units = 'px|rem|em|%|vw|vh|vmin|vmax|svw|svh|lvw|lvh|dvw|dvh|ch|ex|cqw|cqh|cqi|cqb|cqmin|cqmax|pt|pc|cm|mm|in|q';
+        if (preg_match('/^(\d*\.?\d+)(' . $units . ')$/', $v, $m) === 1) {
+            return ($allowZero || (float) $m[1] > 0) ? $v : $default;
+        }
+
+        if (preg_match('/^(calc|min|max|clamp)\([0-9a-z.%+\-*\/\s,()]+\)$/', $v) === 1
+            && substr_count($v, '(') === substr_count($v, ')')) {
+            return $v;
+        }
+
+        return $default;
+    }
+
+    /**
+     * Validates a CSS color for the carousel arrows.
+     *
+     * Accepts hex (with or without '#'), rgb()/rgba()/hsl()/hsla(), a named
+     * color or keyword such as `transparent` or `currentcolor`, and a
+     * `var(--name)` reference (for example an Elementor global color).
+     *
+     * @param string $value   Raw value.
+     * @param string $default Fallback color.
+     * @return string Validated CSS color.
+     */
+    private function sanitizeCssColor(string $value, string $default): string
+    {
+        $v = trim($value);
+        if ($v === '' || strlen($v) > 80) {
+            return $default;
+        }
+
+        if (preg_match('/^#?(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i', $v) === 1) {
+            return '#' . ltrim($v, '#');
+        }
+
+        if (preg_match('/^(?:rgba?|hsla?)\(\s*[0-9a-z.,%\s\/+\-]+\)$/i', $v) === 1
+            || preg_match('/^var\(\s*--[a-z0-9_-]+\s*\)$/i', $v) === 1) {
+            return $v;
+        }
+
+        if (preg_match('/^[a-z]{3,30}$/i', $v) === 1) {
+            return strtolower($v);
+        }
+
+        return $default;
+    }
+
+    /**
      * Returns true when any podcast player styling attribute is non-empty.
      *
      * Checks all nine podcast player styling keys in `$settings`. When at least
@@ -1575,7 +1901,9 @@ final class Shortcode
      *
      * Reads the grid configuration stored in a transient by renderUserSearchGrid(),
      * applies the user search term and pagination, renders the grid items and
-     * pagination HTML server-side, and returns them as JSON.
+     * pagination HTML server-side, and returns them as JSON. A collection stored
+     * with carousel layout is returned as carousel markup for the requested
+     * result page, with the same carousel settings it was first rendered with.
      *
      * Accepts POST fields: nonce, playlist_name, media_platform, grid_key,
      * search_term, search_by (any|title|description), page, per_page.
@@ -1622,6 +1950,13 @@ final class Shortcode
         $maxDisplay       = (int) ($gridConfig['maxDisplay'] ?? 0);
         $instanceGridId   = sanitize_key((string) ($gridConfig['gridId'] ?? ''));
         $settings['noStyling'] = $noStyling;
+
+        // Grids stored before carousel support (and every grid since) have no
+        // 'carousel' entry and keep rendering exactly as before. A carousel's
+        // stored configuration is normalized again on read.
+        $layout = is_array($gridConfig['carousel'] ?? null)
+            ? $this->normalizeCarouselConfig($gridConfig['carousel'])
+            : ['layout' => self::LAYOUT_GRID, 'gap' => $gap, 'minsize' => $minsize];
 
         $mediaConfig = $this->findMediaConfig($playlistName, $mediaType);
         if ($mediaConfig === null) {
@@ -1679,22 +2014,16 @@ final class Shortcode
             $gridSettings['multipleGridText'] = $multiplegridtext;
         }
 
-        $gridHtml = '';
+        $cards = [];
         foreach ($pageData as $row) {
-            $gridHtml .= $this->renderMediaItem($row, $gridSettings, false, $playlistName, $mediaType);
+            $cards[] = $this->renderMediaItem($row, $gridSettings, false, $playlistName, $mediaType);
         }
 
-        if ($gridHtml === '') {
-            $gridHtml = $noresults !== ''
-                ? '<p class="maw-grid-noresults">' . esc_html($noresults) . '</p>'
-                : '<h3 class="media-api-widget-err-msg">No ' . esc_html($mediaType) . ' items found.</h3>';
-        }
+        $emptyHtml = $noresults !== ''
+            ? '<p class="maw-grid-noresults">' . esc_html($noresults) . '</p>'
+            : '<h3 class="media-api-widget-err-msg">No ' . esc_html($mediaType) . ' items found.</h3>';
 
-        $layoutClass     = $this->classAttr('maw-media-items-grid-layout', $noStyling ? '' : 'media_items_multiple_grid_layout');
-        $gridWrapperHtml =
-            '<div' . $layoutClass . ' style="gap: ' . esc_attr($gap) . '; grid-template-columns: repeat(auto-fill, minmax(min(100%, ' . esc_attr($minsize) . '), 1fr));">' .
-                $gridHtml .
-            '</div>';
+        $gridWrapperHtml = $this->renderCollection($cards, $layout, $noStyling, $emptyHtml);
 
         // A grid rendered with its own search id (see resolveGridSearchId())
         // stored that id with its settings; its links keep its page parameter.
@@ -1748,7 +2077,15 @@ final class Shortcode
             $gridSettings['multipleGridText'] = $gridtext;
         }
 
-        $gridKey = substr(md5(wp_json_encode($gridSettings) . $playlistName . $mediaType . $gap . $minsize . $episodeRange . (string) $perPage . (string) $maxPages . (string) $maxDisplay . $instanceGridId), 0, 16);
+        // Carousel settings are part of the stored configuration and of its
+        // key, so two collections differing only in layout or arrow settings
+        // never share a transient. The identity is empty for a grid, which
+        // keeps every grid's key and transient exactly as before.
+        $layout           = $this->buildCollectionLayout($itemData);
+        $isCarousel       = $layout['layout'] === self::LAYOUT_CAROUSEL;
+        $layoutIdentity   = $isCarousel ? (string) wp_json_encode($layout) : '';
+
+        $gridKey = substr(md5(wp_json_encode($gridSettings) . $playlistName . $mediaType . $gap . $minsize . $episodeRange . (string) $perPage . (string) $maxPages . (string) $maxDisplay . $instanceGridId . $layoutIdentity), 0, 16);
         $gridConfig = [
             'settings'         => $gridSettings,
             'gap'              => $gap,
@@ -1763,6 +2100,9 @@ final class Shortcode
         ];
         if ($instanceGridId !== '') {
             $gridConfig['gridId'] = $instanceGridId;
+        }
+        if ($isCarousel) {
+            $gridConfig['carousel'] = $layout;
         }
         set_transient('maw_grid_' . $gridKey, $gridConfig, 86400);
 
@@ -1793,22 +2133,16 @@ final class Shortcode
         $offset   = ($page - 1) * $perPage;
         $pageData = array_slice($filteredData, $offset, $perPage);
 
-        $gridHtml = '';
+        $cards = [];
         foreach ($pageData as $row) {
-            $gridHtml .= $this->renderMediaItem($row, $gridSettings, false, $playlistName, $mediaType);
+            $cards[] = $this->renderMediaItem($row, $gridSettings, false, $playlistName, $mediaType);
         }
 
-        if ($gridHtml === '') {
-            $gridHtml = $noresults !== ''
-                ? '<p class="maw-grid-noresults">' . esc_html($noresults) . '</p>'
-                : '<h3 class="media-api-widget-err-msg">No ' . esc_html($mediaType) . ' items found in playlist based upon search parameters provided.</h3>';
-        }
+        $emptyHtml = $noresults !== ''
+            ? '<p class="maw-grid-noresults">' . esc_html($noresults) . '</p>'
+            : '<h3 class="media-api-widget-err-msg">No ' . esc_html($mediaType) . ' items found in playlist based upon search parameters provided.</h3>';
 
-        $layoutClass    = $this->classAttr('maw-media-items-grid-layout', $noStyling ? '' : 'media_items_multiple_grid_layout');
-        $gridLayoutHtml =
-            '<div' . $layoutClass . ' style="gap: ' . esc_attr($gap) . '; grid-template-columns: repeat(auto-fill, minmax(min(100%, ' . esc_attr($minsize) . '), 1fr));">' .
-                $gridHtml .
-            '</div>';
+        $gridLayoutHtml = $this->renderCollection($cards, $layout, $noStyling, $emptyHtml);
 
         return
             '<div class="maw-grid-search-wrapper"' .

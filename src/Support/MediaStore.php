@@ -148,7 +148,13 @@ final class MediaStore
      *                                      for podcast.
      * @param array<string,mixed>  $options 'ttl' (int, defaults to the configured
      *                                      media cache TTL), 'write_backup' (bool,
-     *                                      default true), 'now' (?int).
+     *                                      default true), 'now' (?int), and
+     *                                      'after_write' (?callable, internal): run
+     *                                      under the storage lock once both writes
+     *                                      succeeded and before the stored action
+     *                                      fires. The refresh paths use it to record
+     *                                      the post index's refresh manifest; it is
+     *                                      never run for a refused or partial store.
      * @return array{ok:bool,wrote:bool,data:mixed,error:\WP_Error|null}
      *         `ok` is true only when everything was written. `wrote` is true when
      *         the transient was updated, which stays true for a partial persist
@@ -586,6 +592,16 @@ final class MediaStore
                     'The media data backup file could not be written.'
                 ),
             ];
+        }
+
+        if (isset($options['after_write']) && is_callable($options['after_write'])) {
+            try {
+                ($options['after_write'])($filtered);
+            } catch (\Throwable $e) {
+                // Bookkeeping only: the data is stored, so a failure here must
+                // not turn a completed store into a reported failure.
+                self::logThrowable('An after_write callback threw', $e);
+            }
         }
 
         self::fireStored($filtered, $context);

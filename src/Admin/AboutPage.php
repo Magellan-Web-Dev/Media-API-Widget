@@ -9,7 +9,8 @@ if (!defined('ABSPATH')) { exit; }
  * Provides an in-admin reference guide covering every feature of the
  * Media API Widget plugin: admin setup, shortcode fields, all four
  * shortcode tags with copy-paste examples, the full attribute reference,
- * grid mode, the podcast player, SEO meta tags, caching architecture, and
+ * grid mode, the carousel layout (including its Elementor controls), the
+ * podcast player, SEO meta tags, caching architecture, and
  * the developer hooks and data-enrichment API — the pre-store filter, the
  * post-storage action, and the stored-data updater function, together with
  * the recommended asynchronous transcription workflow.
@@ -50,6 +51,8 @@ final class AboutPage
                 <a href="#maw-styling-hooks">Styling Hooks</a>
                 <a href="#maw-grid">Grid Mode</a>
                 <a href="#maw-grid-search">Grid Search &amp; Pagination</a>
+                <a href="#maw-carousel">Carousel</a>
+                <a href="#maw-stored-posts">Stored Posts &amp; Loop Grid</a>
                 <a href="#maw-podcast-player">Podcast Player</a>
                 <a href="#maw-seo">SEO</a>
                 <a href="#maw-caching">Caching</a>
@@ -67,6 +70,8 @@ final class AboutPage
                         <tr><td><strong>YouTube Playlists</strong></td><td>Fetches playlist items from the YouTube Data API v3, caches them, and renders clickable thumbnails that open a full lightbox video player with carousel navigation.</td></tr>
                         <tr><td><strong>Podcast Feeds</strong></td><td>Parses RSS feeds directly or via Apple/iTunes lookup for Omny, SoundCloud, Buzzsprout, and others. Thumbnails open an embedded audio player.</td></tr>
                         <tr><td><strong>Custom Podcast Player</strong></td><td>A fully-themed, self-hosted podcast player served at <code>/podcast/player</code> and embeddable anywhere as an <code>&lt;iframe&gt;</code>.</td></tr>
+                        <tr><td><strong>Grid &amp; Carousel Collections</strong></td><td>Show many episodes as a responsive grid or as a carousel with arrows, swiping, trackpad scrolling and mouse dragging &mdash; from a shortcode or either Elementor widget. See <a href="#maw-carousel">Carousel Layout</a>.</td></tr>
+                        <tr><td><strong>Playlist Items as Posts</strong></td><td>Optionally keep every item of a playlist as a WordPress post, kept in sync, so Elementor Pro's Loop Grid and other builders can list them with their own templates. See <a href="#maw-stored-posts">Stored Playlist Posts</a>.</td></tr>
                         <tr><td><strong>Global Shortcode Fields</strong></td><td>Store key/value pairs in the admin and reference them dynamically in any shortcode attribute using <code>&#123;&#123;field_name&#125;&#125;</code> syntax.</td></tr>
                         <tr><td><strong>SEO Meta Tags</strong></td><td>Automatically generates Open Graph and Twitter Card tags based on the media content found on each page.</td></tr>
                         <tr><td><strong>Layered Cache</strong></td><td>Combines WordPress transients, local backup JSON files, and browser localStorage to minimize API calls and handle outages gracefully.</td></tr>
@@ -78,7 +83,7 @@ final class AboutPage
             <!-- ADMIN SETUP -->
             <section id="maw-admin-setup" class="maw-section">
                 <h2>Admin Setup — Media Items</h2>
-                <p>Go to <strong>Media API → Settings</strong> to define your YouTube playlists and podcast feeds. Each <em>media item</em> gets a unique <strong>Name (playlist_name)</strong> — a lowercase slug you will reference in shortcodes.</p>
+                <p>Go to <strong>Media API → Playlist Settings</strong> to define your YouTube playlists and podcast feeds. Each <em>media item</em> gets a unique <strong>Name (playlist_name)</strong> — a lowercase slug you will reference in shortcodes.</p>
 
                 <h3>YouTube</h3>
                 <table class="widefat striped maw-table maw-about-table">
@@ -89,6 +94,7 @@ final class AboutPage
                         <tr><td><strong>API Key</strong></td><td>Your Google/YouTube Data API v3 key from Google Cloud Console.</td></tr>
                         <tr><td><strong>Sort Mode</strong></td><td><em>Normal</em> — preserves YouTube order. <em>Number in title</em> — extracts the leading number from each video title and sorts descending. Ideal for TV episodes numbered in their title.</td></tr>
                         <tr><td><strong>Load full playlist</strong></td><td>When checked, fetches all videos (paginating past the 50-item API limit). When unchecked, limits to the first 6.</td></tr>
+                        <tr><td><strong>Store playlist items as WordPress posts</strong></td><td>Off by default. Keeps one post per video for Loop Grids and other builders. See <a href="#maw-stored-posts">Stored Playlist Posts</a>.</td></tr>
                     </tbody>
                 </table>
 
@@ -99,6 +105,9 @@ final class AboutPage
                         <tr><td><strong>Name (playlist_name)</strong></td><td>A unique slug, e.g. <code>my_podcast</code>.</td></tr>
                         <tr><td><strong>Platform</strong></td><td>See the Podcast Platform table below.</td></tr>
                         <tr><td><strong>RSS URL / ID / Embed URL</strong></td><td>Depends on the platform chosen — RSS URL, Apple numeric ID, or an embed player URL.</td></tr>
+                        <tr><td><strong>Season/episode regex</strong></td><td>Off by default. When checked, a pattern numbers each episode from its title: named groups <code>season</code> and <code>episode</code> are used when present; otherwise two groups are season then episode, and one group is the episode. Matching ignores case. A title the pattern does not match is left unnumbered &mdash; numbers are never guessed.</td></tr>
+                        <tr><td><strong>Sort mode</strong></td><td>Shown with the regex. <em>Season / episode (newest first)</em> (default) orders numbered episodes by season, then episode, newest first, with unnumbered episodes after them in feed order. <em>Feed order</em> keeps the feed's order and only adds the numbers. This is the order of the plugin's podcast cards and grids and of stored posts; the <code>/podcast/player</code> page reads the feed itself and keeps the feed's order.</td></tr>
+                        <tr><td><strong>Store playlist items as WordPress posts</strong></td><td>Off by default. Keeps one post per episode. See <a href="#maw-stored-posts">Stored Playlist Posts</a>.</td></tr>
                     </tbody>
                 </table>
 
@@ -193,6 +202,9 @@ final class AboutPage
 
                 <p><strong>YouTube — all episodes in a grid:</strong></p>
                 <pre class="maw-code">[media-api-widget-render playlist_name="my_show" media_platform="youtube" multiplegrid="true" multiplegridtext="title"]</pre>
+
+                <p><strong>YouTube — the latest 12 episodes in a carousel:</strong></p>
+                <pre class="maw-code">[media-api-widget-render playlist_name="my_show" media_platform="youtube" multiplegrid="true" multiplegridlayout="carousel" multiplegridlimititems="12"]</pre>
 
                 <p><strong>Podcast — episode thumbnail (Direct RSS):</strong></p>
                 <pre class="maw-code">[media-api-widget-render
@@ -301,7 +313,7 @@ final class AboutPage
                         <tr><td><code>mediatitle</code></td><td><code>false</code></td><td>When <code>true</code>, output the episode title as a <code>&lt;p&gt;</code> tag only — no thumbnail rendered.</td></tr>
                         <tr><td><code>mediadescription</code></td><td><code>false</code></td><td>When <code>true</code>, output the episode description as a <code>&lt;p&gt;</code> tag only — no thumbnail rendered.</td></tr>
                         <tr><td><code>mediadescriptiontextcolor</code></td><td>—</td><td>CSS color for the <code>mediatitle</code> / <code>mediadescription</code> output.</td></tr>
-                        <tr><td><code>nostyling</code></td><td><code>false</code></td><td>When <code>true</code>, suppresses the plugin's <strong>styling</strong> class names (<code>media_item</code>, <code>media-item-*</code>, <code>media_items_multiple_grid_layout</code>, &hellip;) so you don't inherit the plugin's built-in CSS. The namespaced <code>maw-</code> <strong>hook classes</strong> (see <a href="#maw-styling-hooks">Styling Hooks</a>) are still emitted either way. Applies to all render modes: single item, text-only, static grid, and user-search grid. Data attributes used by the lightbox JS are unaffected.</td></tr>
+                        <tr><td><code>nostyling</code></td><td><code>false</code></td><td>When <code>true</code>, suppresses the plugin's <strong>styling</strong> class names (<code>media_item</code>, <code>media-item-*</code>, <code>media_items_multiple_grid_layout</code>, <code>media-carousel*</code>, &hellip;) so you don't inherit the plugin's built-in CSS. The namespaced <code>maw-</code> <strong>hook classes</strong> (see <a href="#maw-styling-hooks">Styling Hooks</a>) are still emitted either way. Applies to all render modes: single item, text-only, static grid, user-search grid, and carousel (which keeps its functional layout &mdash; see <a href="#maw-carousel">Carousel Layout</a>). Data attributes used by the lightbox JS are unaffected.</td></tr>
                         <tr><td><code>showlightbox</code></td><td><code>true</code></td><td>When <code>false</code>, clicking the item dispatches the <a href="#maw-js-events"><code>mediaApiWidgetItemClick</code></a> JS event but does <strong>not</strong> open the lightbox. Omitting this attribute (the default) preserves normal lightbox behavior for all existing shortcodes.</td></tr>
                     </tbody>
                 </table>
@@ -342,8 +354,12 @@ final class AboutPage
                         <tr><td>Title/description block (<code>mediatitle</code> / <code>mediadescription</code>)</td><td><code>maw-media-description-text</code></td></tr>
                         <tr><td>Audio play bar</td><td><code>maw-audio-play-bar</code></td></tr>
                         <tr><td>Playlist heading / overlay sub-text</td><td><code>maw-playlist-episode-text</code> / <code>maw-sub-text</code></td></tr>
+                        <tr><td>Carousel container / scrolling row / track / slide</td><td><code>maw-carousel</code> / <code>maw-carousel-viewport</code> / <code>maw-carousel-track</code> / <code>maw-carousel-slide</code></td></tr>
+                        <tr><td>Carousel arrow button</td><td><code>maw-carousel-arrow</code> ＋ <code>maw-carousel-arrow-left</code> / <code>maw-carousel-arrow-right</code> (disabled: <code>[aria-disabled="true"]</code>)</td></tr>
+                        <tr><td>Carousel arrow icon or image</td><td><code>maw-carousel-arrow-icon</code></td></tr>
                     </tbody>
                 </table>
+                <p class="description">The carousel's functional layout is attached to <code>data-maw-carousel*</code> attributes, not to these classes, so the hook classes stay free of plugin CSS. Its arrow appearance uses the <code>media-carousel</code> / <code>media-carousel-arrow</code> styling classes, which <code>nostyling</code> omits.</p>
                 <p class="description">The grid wrapper, search bar, and pagination controls have always carried their own <code>maw-</code> classes (<code>maw-grid-search-wrapper</code>, <code>maw-grid-items</code>, <code>maw-grid-pagination</code>, <code>maw-page-btn</code>, <code>maw-search-input</code>, &hellip;) and are unaffected by <code>nostyling</code>.</p>
                 <pre class="maw-code">/* With nostyling="true": no plugin styles to override, just hooks */
 .maw-media-items-grid-layout &#123; gap: 2rem; &#125;
@@ -354,18 +370,19 @@ final class AboutPage
             <!-- GRID MODE -->
             <section id="maw-grid" class="maw-section">
                 <h2>Grid Mode</h2>
-                <p>Set <code>multiplegrid="true"</code> on <code>[media-api-widget-render]</code> to render all (or a filtered subset of) playlist items in a responsive CSS grid layout. Each item is individually clickable.</p>
+                <p>Set <code>multiplegrid="true"</code> on <code>[media-api-widget-render]</code> to render all (or a filtered subset of) playlist items in a responsive CSS grid layout. Each item is individually clickable. Add <code>multiplegridlayout="carousel"</code> to show the same items in a <a href="#maw-carousel">carousel</a> instead.</p>
 
                 <table class="widefat striped maw-table maw-about-table">
                     <thead><tr><th style="width:240px;">Attribute</th><th style="width:110px;">Default</th><th>Description</th></tr></thead>
                     <tbody>
                         <tr><td><code>multiplegrid</code></td><td><code>false</code></td><td>Set to <code>true</code> to enable grid mode.</td></tr>
+                        <tr><td><code>multiplegridlayout</code></td><td><code>grid</code></td><td><code>grid</code> or <code>carousel</code>, for both <code>multiplegrid</code> and <code>multiplegridusersearch</code>. Any other value keeps the grid. See <a href="#maw-carousel">Carousel Layout</a>.</td></tr>
                         <tr><td><code>multiplegridshowall</code></td><td><code>false</code></td><td>When <code>true</code>, disables all filtering — shows every item in the playlist.</td></tr>
                         <tr><td><code>multiplegridsearch</code></td><td>—</td><td>Filter items to those whose title contains this keyword.</td></tr>
                         <tr><td><code>multiplegridlimititems</code></td><td>—</td><td>Maximum number of items to show.</td></tr>
                         <tr><td><code>multiplegridepisoderange</code></td><td>—</td><td>Show only items in an episode range. Format: <code>1-10</code>. Overrides search and limit.</td></tr>
-                        <tr><td><code>multiplegridgap</code></td><td><code>48px</code></td><td>CSS <code>gap</code> between grid items.</td></tr>
-                        <tr><td><code>multiplegridminsize</code></td><td><code>400px</code></td><td>Minimum column width in the <code>auto-fill</code> grid.</td></tr>
+                        <tr><td><code>multiplegridgap</code></td><td><code>48px</code></td><td>CSS <code>gap</code> between grid items. In a carousel, the space between cards.</td></tr>
+                        <tr><td><code>multiplegridminsize</code></td><td><code>400px</code></td><td>Minimum column width in the <code>auto-fill</code> grid. In a carousel, the minimum card width.</td></tr>
                         <tr><td><code>multiplegridtext</code></td><td>—</td><td>Show text below each grid item: <code>title</code>, <code>description</code>, <code>both</code>, <code>numberedtitle</code>, or <code>numberedtitleanddescription</code>. YouTube only. The <code>numberedtitle</code> options require the playlist's sort mode to be "Number in title": they display "Episode N" (or "Season S Episode N" when the season/episode regex is set), falling back to the plain title for items without a number.</td></tr>
                         <tr><td><code>multiplegridusersearch</code></td><td><code>false</code></td><td>Set to <code>true</code> to enable the user-searchable + paginated grid mode. See <a href="#maw-grid-search">Grid Search &amp; Pagination</a>.</td></tr>
                         <tr><td><code>multiplegridperpage</code></td><td><code>12</code></td><td>Max items per page when <code>multiplegridusersearch="true"</code>.</td></tr>
@@ -415,7 +432,7 @@ final class AboutPage
                 </ul>
 
                 <div class="maw-callout">
-                    <strong>Note:</strong> <code>multiplegridusersearch</code> and <code>multiplegrid</code> are mutually exclusive. When user search is enabled, the standard static grid path is bypassed entirely. All other grid attributes (<code>multiplegridgap</code>, <code>multiplegridminsize</code>, <code>multiplegridtext</code>, <code>multiplegridepisoderange</code>, etc.) continue to work as filters and display options within this mode.
+                    <strong>Note:</strong> <code>multiplegridusersearch</code> and <code>multiplegrid</code> are mutually exclusive. When user search is enabled, the standard static grid path is bypassed entirely. All other grid attributes (<code>multiplegridgap</code>, <code>multiplegridminsize</code>, <code>multiplegridtext</code>, <code>multiplegridepisoderange</code>, etc.) continue to work as filters and display options within this mode. Add <code>multiplegridlayout="carousel"</code> to show each result page as a carousel &mdash; see <a href="#maw-carousel-search">Searchable carousels</a>.
                 </div>
 
                 <h3>Full Example</h3>
@@ -449,6 +466,233 @@ final class AboutPage
 &lt;/div&gt;</pre>
             </section>
 
+            <!-- CAROUSEL -->
+            <section id="maw-carousel" class="maw-section">
+                <h2>Carousel Layout</h2>
+                <p>A carousel shows the same media cards as a grid &mdash; same filters, same cards, same playback &mdash; in one horizontally scrolling row. It sizes its cards from the space it actually has, so the same carousel fits a full-width section, an Elementor column, or a phone. It works on any page; Elementor is not required.</p>
+
+                <div class="maw-callout">
+                    <strong>New in 6.1.0.</strong> The default layout is still the grid, so existing shortcodes and widgets look exactly as before until you choose the carousel.
+                </div>
+
+                <h3>Turning It On</h3>
+                <table class="widefat striped maw-table maw-about-table">
+                    <thead><tr><th style="width:220px;">Where</th><th>How</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>Shortcode</strong></td><td>Add <code>multiplegridlayout="carousel"</code> to a <code>[media-api-widget-render]</code> shortcode that has <code>multiplegrid="true"</code> or <code>multiplegridusersearch="true"</code>.</td></tr>
+                        <tr><td><strong>Elementor &mdash; Classic and Atomic widgets</strong></td><td>Set <strong>Output</strong> to <em>Grid or carousel</em> or <em>Searchable grid or carousel with pagination</em>, then <strong>Grid &amp; Carousel &rarr; Layout</strong> to <em>Carousel</em>. Minimum item width and Gap are in the same section; arrow settings appear in <strong>Carousel Navigation</strong>. In the Classic widget arrow images come from the media library; in the Atomic widget, enter the image URL.</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Attributes</h3>
+                <table class="widefat striped maw-table maw-about-table">
+                    <thead><tr><th style="width:240px;">Attribute (Elementor control)</th><th style="width:150px;">Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>multiplegridlayout</code><br>(Layout)</td><td><code>grid</code></td><td><code>carousel</code> enables the carousel.</td></tr>
+                        <tr><td><code>multiplegridminsize</code><br>(Minimum item width)</td><td><code>400px</code></td><td>Cards never get narrower than this &mdash; unless only one card fits, which then fills the full width.</td></tr>
+                        <tr><td><code>multiplegridgap</code><br>(Gap)</td><td><code>48px</code></td><td>Space between cards.</td></tr>
+                        <tr><td><code>carouselstep</code><br>(Arrow step)</td><td><code>item</code></td><td><code>item</code> moves one card per arrow click; <code>group</code> moves as many cards as are visible.</td></tr>
+                        <tr><td><code>carouselarrowleftimgurl</code><br>(Left arrow image)</td><td><em>built-in arrow</em></td><td>Image for the left arrow.</td></tr>
+                        <tr><td><code>carouselarrowrightimgurl</code><br>(Right arrow image)</td><td><em>built-in arrow</em></td><td>Image for the right arrow. Each side falls back to the built-in arrow on its own.</td></tr>
+                        <tr><td><code>carouselarrowsize</code><br>(Arrow button size)</td><td><code>48px</code></td><td>Width and height of each arrow button.</td></tr>
+                        <tr><td><code>carouselarrowiconsize</code><br>(Arrow icon size)</td><td><code>24px</code></td><td>Size of the arrow icon or image inside the button.</td></tr>
+                        <tr><td><code>carouselarrowcolor</code><br>(Arrow color)</td><td><code>#ffffff</code></td><td>Color of the built-in arrow.</td></tr>
+                        <tr><td><code>carouselarrowbackground</code><br>(Arrow background)</td><td><code>rgba(0, 0, 0, 0.6)</code></td><td>Button background. Use <code>transparent</code> with custom arrow images.</td></tr>
+                        <tr><td><code>carouselarrowoffset</code><br>(Arrow offset)</td><td><code>12px</code></td><td>Space between an arrow and the cards (or the inset from the edge when arrows overlay the cards).</td></tr>
+                    </tbody>
+                </table>
+                <p class="description">Sizes accept <code>px</code>, <code>rem</code>, <code>em</code>, <code>%</code> (of the carousel's width), <code>vw</code> and other CSS units, a plain number (pixels), or <code>calc()</code> / <code>clamp()</code>. Colors accept hex, <code>rgb()</code>/<code>rgba()</code>, color names, or a CSS variable such as an Elementor global color. An invalid value falls back to the default shown above. All other grid, search, card, lightbox and podcast attributes, <code>&#123;&#123;field&#125;&#125;</code> references, and same-named stored-field defaults work exactly as they do for a grid.</p>
+
+                <h3>How Cards Are Sized</h3>
+                <p>The carousel shows as many cards as fit at the minimum width, then shares the space evenly between them: <code>visible cards = floor((available width + gap) &divide; (minimum width + gap))</code>, at least one and never more than there are cards. With a <code>300px</code> minimum and a <code>24px</code> gap:</p>
+                <table class="widefat striped maw-table maw-about-table" style="max-width:520px;">
+                    <thead><tr><th>Available width</th><th>Cards shown</th></tr></thead>
+                    <tbody>
+                        <tr><td>1,000px</td><td>3</td></tr>
+                        <tr><td>650px</td><td>2</td></tr>
+                        <tr><td>600px</td><td>1, filling the full width</td></tr>
+                    </tbody>
+                </table>
+                <p>It recalculates whenever its space changes &mdash; resizing the window, changing an Elementor column, opening a tab or accordion it sits in, or rotating a phone &mdash; and keeps the same first card in view where it can. Arrows sit in gutters beside the cards, vertically centered, while at least two cards still fit next to them; in narrower spaces they overlay the cards' edges so the cards keep the full width. When every card fits, the arrows are hidden. The carousel never makes the page scroll sideways.</p>
+
+                <h3>Navigation &amp; Touch</h3>
+                <ul>
+                    <li><strong>Arrows</strong> move one card per click (or one visible group with <code>carouselstep="group"</code>), stop at the first and last positions, and disable themselves there. The last card always ends flush with the edge &mdash; no empty space after it.</li>
+                    <li><strong>Phones and tablets:</strong> swipe sideways. Up/down swipes still scroll the page.</li>
+                    <li><strong>Computers:</strong> scroll sideways with a trackpad or a horizontal mouse wheel, or <strong>click and drag</strong> the row with the mouse. Scrolling always settles on a card edge.</li>
+                    <li>Swiping or dragging never opens a video or podcast. A normal click or tap on a card plays it, exactly as in a grid, and clicking an arrow never plays anything.</li>
+                    <li><strong>Keyboard:</strong> the arrows are labelled buttons with a visible focus ring (Enter or Space). Focusing the row lets the arrow keys, Page Up/Down and Home/End move through it.</li>
+                    <li>Visitors who have turned on their device's reduce-motion setting see moves happen instantly instead of animating.</li>
+                    <li>Several carousels on one page &mdash; even for the same playlist &mdash; scroll independently.</li>
+                </ul>
+
+                <h3 id="maw-carousel-search">Searchable Carousels</h3>
+                <p>With <code>multiplegridusersearch="true"</code> (or the <em>Searchable grid or carousel with pagination</em> output), each page of results is a carousel.</p>
+                <div class="maw-callout">
+                    <strong>Arrows vs. pagination.</strong> The carousel arrows (and swiping) move through the cards of the <em>results page that is already loaded</em>. The pagination buttons below load a <em>different results page</em>, exactly as they do for a grid &mdash; same page links, URLs and back-button behavior. Each new search or page starts its carousel at the first card.
+                </div>
+
+                <h3>Plugin Styling Off (<code>nostyling</code>)</h3>
+                <p><code>nostyling="true"</code> (Elementor: <strong>Plugin Styling &rarr; Disable plugin styling classes</strong>) removes the look: unstyled cards, and arrow buttons without the round dark background, colors or hover effect &mdash; so <code>carouselarrowcolor</code> and <code>carouselarrowbackground</code> do nothing. The carousel still scrolls, sizes its cards, places and sizes its arrows, disables them at the ends and shows focus rings, because it cannot work without that. Style the <code>maw-carousel-*</code> classes listed under <a href="#maw-styling-hooks">Styling Hooks</a> to design your own.</p>
+
+                <h3>Good to Know</h3>
+                <ul>
+                    <li>Text below cards (<code>multiplegridtext</code>) is still YouTube-only, as in the grid.</li>
+                    <li>The layout only affects collections; single cards, title/description text and the podcast player ignore it.</li>
+                    <li>Hand-written legacy <code>data-playlistname</code> placeholders (rendered in the browser) have no carousel layout.</li>
+                    <li>Media cards cannot be reached with the Tab key in either layout; keyboard users use the arrows and the row.</li>
+                    <li>Card hover effects that grow outside a card (scaling, shadows) are clipped by the scrolling row.</li>
+                    <li>In the Elementor editor, changing a setting redraws the carousel from its first card.</li>
+                </ul>
+
+                <h3>Examples</h3>
+                <p><strong>Basic carousel:</strong></p>
+                <pre class="maw-code">[media-api-widget-render
+    playlist_name="my_show"
+    media_platform="youtube"
+    multiplegrid="true"
+    multiplegridlayout="carousel"
+    multiplegridlimititems="12"
+    multiplegridminsize="300px"
+    multiplegridgap="24px"
+    multiplegridtext="title"
+]</pre>
+
+                <p><strong>Custom arrows, one visible group per click:</strong></p>
+                <pre class="maw-code">[media-api-widget-render
+    playlist_name="my_show"
+    media_platform="youtube"
+    multiplegrid="true"
+    multiplegridlayout="carousel"
+    carouselstep="group"
+    carouselarrowleftimgurl="https://example.com/arrows/left.svg"
+    carouselarrowrightimgurl="https://example.com/arrows/right.svg"
+    carouselarrowbackground="transparent"
+    carouselarrowsize="3.5rem"
+    carouselarrowiconsize="2.5rem"
+    carouselarrowoffset="0.5rem"
+]</pre>
+
+                <p><strong>Searchable carousel with its search bar:</strong></p>
+                <pre class="maw-code">[media-api-widget-grid-search playlist_name="my_show" media_platform="youtube" placeholder="Search episodes..."]
+
+[media-api-widget-render
+    playlist_name="my_show"
+    media_platform="youtube"
+    multiplegridusersearch="true"
+    multiplegridlayout="carousel"
+    multiplegridperpage="9"
+    multiplegridminsize="300px"
+    multiplegridgap="24px"
+    noresults="No episodes matched your search."
+]</pre>
+            </section>
+
+            <!-- STORED PLAYLIST POSTS -->
+            <section id="maw-stored-posts" class="maw-section">
+                <h2>Stored Playlist Posts (Loop Grid &amp; Page Builders)</h2>
+                <p>Optionally, per playlist, the plugin keeps every item of a playlist as a WordPress post of the <code>maw_media_item</code> type, synchronized with the playlist. Elementor Pro's <strong>Loop Grid</strong>, other page builders, <code>WP_Query</code> and the REST API can then list YouTube videos and podcast episodes like any other posts, with your own templates. The shortcodes, widgets and players do not use these posts and work exactly as before.</p>
+
+                <div class="maw-callout">
+                    <strong>New in 6.1.0, off by default.</strong> Nothing is stored, scheduled or added to the menu until a playlist turns it on.
+                </div>
+
+                <h3>Turning It On</h3>
+                <ol>
+                    <li>On <a href="<?php echo esc_url(menu_page_url(Menu::SLUG, false)); ?>">Playlist Settings</a>, check <strong>Store playlist items as WordPress posts</strong> on a playlist and click <strong>Save</strong>.</li>
+                    <li>An initial population is queued. It runs in the background through WP-Cron, in batches, from the playlist data already stored &mdash; no extra API request. A status panel under the checkbox shows its progress.</li>
+                    <li><strong>All Media Items</strong> and <strong>Media API - {playlist_name}</strong> appear in this menu.</li>
+                </ol>
+                <div class="maw-callout">
+                    <strong>Storing a full playlist as WordPress posts can create many database records.</strong> Each item becomes one post with about fifteen custom fields. Initial imports and refreshes may take time. Synchronization runs in the background; changed items are updated in place and removed source items are deleted after a successful complete refresh. WP-Cron runs when the site receives traffic; on a low-traffic site, trigger <code>wp-cron.php</code> from a real server cron job.
+                </div>
+
+                <h3>Status, Actions and Admin Views</h3>
+                <p>The status panel shows the state (<em>Pending</em>, <em>Running</em>, <em>Complete</em>, <em>Error</em>, <em>Off</em>), the number of stored posts, the last successful synchronization, the last result, and &mdash; when nothing was removed &mdash; why. Its actions require the <code>manage_options</code> capability and a nonce for that action and playlist.</p>
+                <table class="widefat striped maw-table maw-about-table">
+                    <thead><tr><th style="width:200px;">Action</th><th>Effect</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>Resync now</strong></td><td>Queues a full synchronization from the stored data, starting from the first item.</td></tr>
+                        <tr><td><strong>View posts</strong></td><td>Opens <strong>Media API - {playlist_name}</strong>.</td></tr>
+                        <tr><td><strong>Delete stored posts</strong></td><td>After a confirmation, permanently deletes this playlist's generated posts (up to 500 per click). While storage is on, the next synchronization recreates them.</td></tr>
+                    </tbody>
+                </table>
+                <p><strong>Media API - {playlist_name}</strong> lists the playlist's posts in playlist order with Image, Season, Episode and Position columns and Playlist and Media type filters. <strong>View details</strong> opens a read-only screen with every stored field and the key builders read; the title and synchronized fields cannot be changed there. The post <strong>status</strong> stays editable: <strong>Draft</strong> hides an item from loops (synchronization never republishes it), and a trashed item stays in the Trash.</p>
+
+                <h3>Stored Fields</h3>
+                <table class="widefat striped maw-table maw-about-table">
+                    <thead><tr><th style="width:230px;">Key</th><th style="width:140px;">Label</th><th>Value</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>post_title</code></td><td>Title</td><td>The item title.</td></tr>
+                        <tr><td><code>post_excerpt</code></td><td>Description</td><td>The description as plain text, line breaks kept. An empty podcast <code>&lt;description&gt;</code> falls back to <code>itunes:summary</code> or <code>content:encoded</code>.</td></tr>
+                        <tr><td><code>maw_source_id</code></td><td>ID</td><td>The YouTube video ID, or the podcast episode ID (its GUID; for an episode without one, its audio URL, page URL, or a content hash).</td></tr>
+                        <tr><td><code>maw_season</code>, <code>maw_episode</code></td><td>Season, Episode</td><td>Absent when they cannot be determined.</td></tr>
+                        <tr><td><code>maw_playlist_position</code></td><td>Playlist position</td><td>0-based position in the playlist order; also the post's <code>menu_order</code>.</td></tr>
+                        <tr><td><code>maw_playlist_name</code></td><td>Playlist</td><td>Also a term of the <code>maw_playlist</code> taxonomy.</td></tr>
+                        <tr><td><code>maw_media_type</code></td><td>Media type</td><td><code>youtube</code> or <code>podcast</code>; also a term of the <code>maw_media_type</code> taxonomy.</td></tr>
+                        <tr><td><code>maw_thumbnail_url</code></td><td>Image URL</td><td>The remote thumbnail. Nothing is imported into the Media Library.</td></tr>
+                        <tr><td><code>maw_media_url</code></td><td>Media URL</td><td>The YouTube watch URL, or the episode page (its audio file when it has no page).</td></tr>
+                        <tr><td><code>maw_audio_url</code></td><td>Audio URL</td><td>The episode's audio file. Absent for YouTube.</td></tr>
+                        <tr><td><code>maw_youtube_id</code>, <code>maw_podcast_guid</code></td><td>Provider IDs</td><td>Each absent for the other media type.</td></tr>
+                        <tr><td><code>maw_published_date</code></td><td>Published date</td><td>ISO 8601 when parseable.</td></tr>
+                        <tr><td><code>maw_transcript_*</code>, <code>post_content</code></td><td>Transcript</td><td>Written only by integrations; never overwritten by a synchronization.</td></tr>
+                        <tr><td><code>maw_last_seen</code></td><td>Last seen</td><td>Unix time of the last synchronization that saw the item.</td></tr>
+                    </tbody>
+                </table>
+                <p>All are registered post meta, available to builders, <code>get_post_meta()</code>, and the REST API at <code>/wp-json/wp/v2/maw-media-items</code> (an unknown season or episode is <code>null</code> there). The <strong>Media API Field</strong> tag adds <code>episode_label</code> (<em>Season 2 Episode 5</em>), <code>position_number</code> (1-based) and <code>published_date_formatted</code>. Season and episode come from the playlist's settings: <em>Number in title</em> with its regex for YouTube, the <strong>Season/episode regex</strong> for podcasts.</p>
+                <p><strong>Order.</strong> Posts are stored in playlist order. Front-end queries that only ask for the default date order &mdash; Elementor's Loop Grid default &mdash; list media items in that order; any explicit order (Title, Random, a custom field, <em>Date, ascending</em>) is used as chosen. Filter <code>media_api_widget_post_index_default_order</code> returns <code>false</code> to turn this off. Post Types Order's auto-sort still honors explicit orders, and its Re-Order page is not offered for media items because synchronization sets the order.</p>
+
+                <h3>Elementor Pro Loop Grid</h3>
+                <ol>
+                    <li><strong>Loop item template:</strong> <em>Templates &rarr; Theme Builder &rarr; Loop Item</em> (or <em>Create Template</em> from a Loop Grid). Set <strong>Preview as</strong> to a <em>Media Item</em>.</li>
+                    <li><strong>Bind widgets</strong> with the tags in the <strong>Media API</strong> group of the dynamic tags list (next to ACF):
+                        <table class="widefat striped maw-table maw-about-table" style="margin-top:8px;">
+                            <thead><tr><th style="width:190px;">Tag</th><th style="width:200px;">Controls</th><th>Shows</th></tr></thead>
+                            <tbody>
+                                <tr><td><strong>Media API Field</strong></td><td>Text, number, custom field</td><td>Any stored field from a list: Title, Description, ID, Season, Episode, the season &amp; episode label, dates, positions, playlist, URLs, IDs, transcript fields.</td></tr>
+                                <tr><td><strong>Media API Image</strong></td><td>Image</td><td>The remote thumbnail, with an optional fallback image.</td></tr>
+                                <tr><td><strong>Media API URL</strong></td><td>Link</td><td>Media, audio, image or transcript URL. Plain navigation.</td></tr>
+                                <tr><td><strong>Media API Click Action</strong></td><td>Link</td><td>Makes the element act like the item's media card (below).</td></tr>
+                            </tbody>
+                        </table>
+                        Elementor's own <em>Post Title</em>, <em>Post Excerpt</em> and <em>Post Custom Field</em> (custom key, e.g. <code>maw_season</code>) work too.</li>
+                    <li><strong>Loop Grid:</strong> <strong>Query &rarr; Source</strong> <em>Media API Items</em>; for one playlist, <strong>Include By &rarr; Term</strong> <em>Playlists: {playlist_name}</em>; leave the order at its default for playlist order.</li>
+                </ol>
+                <p>The thumbnail is not a featured image, so use <strong>Media API Image</strong> rather than <em>Featured Image</em>. Media items have no front-end page, so link cards with <strong>Media API URL</strong> or <strong>Media API Click Action</strong>, not the <em>Post URL</em>.</p>
+
+                <h3 id="maw-click-action">Media API Click Action</h3>
+                <p>For any link control &mdash; Button, Image, Heading, Icon, a Container link &mdash; in a loop item. A click dispatches <a href="#maw-js-events"><code>mediaApiWidgetItemClick</code></a> with the same details as a card click, then:</p>
+                <table class="widefat striped maw-table maw-about-table">
+                    <thead><tr><th style="width:230px;">On click</th><th>YouTube</th><th>Podcast</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>Open lightbox (this item only)</strong> (default)</td><td>The lightbox plays that video.</td><td>The player opens on that episode, without the episode list.</td></tr>
+                        <tr><td><strong>Open lightbox with the playlist</strong></td><td>Opens at that video with the playlist panel. Optional border color, font and logo URL.</td><td>The player opens on that episode with the episode list.</td></tr>
+                        <tr><td><strong>Click event only (no lightbox)</strong></td><td colspan="2">Nothing else; <code>showLightbox</code> is <code>false</code>. For your own listener.</td></tr>
+                    </tbody>
+                </table>
+                <p>The link is a <code>#maw-media-…</code> fragment that never navigates. <code>e.detail.element.dataset.postid</code> is the post ID. A video missing from the page's playlist data (for example beyond six items) plays on its own. Clicking in the Elementor editor selects the element and plays nothing. The playlist must still be configured for its player to open; otherwise only the event is dispatched. Podcasts open the playlist platform's player: <code>custom</code> feeds use <code>/podcast/player</code>, Omny and Buzzsprout open the clicked episode, and SoundCloud opens at its default track, as podcast cards do.</p>
+
+                <h3>When Posts Are Updated and Deleted</h3>
+                <p>Synchronization is queued whenever the playlist's data is stored (a refresh, a shortcode warm-up, an enrichment write) and runs through the <code>maw_sync_post_index</code> WP-Cron event: one queued event and one run at a time per playlist, 50 items per batch (filter <code>media_api_widget_post_index_batch_size</code>), retries after 5 minutes up to 5 times. Items are matched by YouTube video ID or podcast GUID within their playlist. Changed fields are rewritten in place, values that disappear are cleared, and post IDs never change; post content (transcripts), status, transcript fields and other custom fields are never touched. The <code>media_api_widget_post_index_synced</code> action fires after each run, for purging page caches.</p>
+                <p>A post is deleted &mdash; permanently &mdash; only when a <strong>complete, validated refresh</strong> (every page fetched, or the whole feed parsed, and stored) no longer contains its item, once per refresh. A valid empty playlist removes every post. Nothing is removed after a failed, partial or malformed refresh, because of the six-item limit (every page is still fetched and recorded), after an expired cache, after an enrichment write, while an item has no usable identity, after a failed save, while a newer refresh is arriving, or on the first run after storage is turned on. Only posts the plugin generated for that playlist are ever removed.</p>
+
+                <h3>Turning It Off and Retention</h3>
+                <ul>
+                    <li><strong>Unchecking</strong> the setting stops synchronization at once, including queued and in-progress batches, and keeps the posts (still published and visible to loops). Set them to Draft or use <strong>Delete stored posts</strong>. Turning it back on starts a fresh initial population.</li>
+                    <li><strong>Removing a playlist</strong> does the same; its posts and view remain while posts exist.</li>
+                    <li><strong>Deactivating the plugin</strong> leaves the posts in the database, unregistered and invisible; reactivating restores them.</li>
+                </ul>
+
+                <h3>Limitations</h3>
+                <ul>
+                    <li>Media items have no front-end single page, archive, or search results.</li>
+                    <li>Images are remote URLs: no Media Library entries, featured images, or generated sizes.</li>
+                    <li>Synchronization depends on WP-Cron. Imports of hundreds of items take several minutes of background batches.</li>
+                    <li>Only YouTube and podcast playlists can store posts; embed-only podcasts have no items.</li>
+                    <li>Synchronized fields cannot be edited in WordPress.</li>
+                </ul>
+            </section>
+
             <!-- PODCAST PLAYER -->
             <section id="maw-podcast-player" class="maw-section">
                 <h2>Podcast Player</h2>
@@ -480,6 +724,7 @@ final class AboutPage
                         <tr><td><code>font</code></td><td><code>Poppins</code></td><td>Google Fonts font name.</td></tr>
                         <tr><td><code>adddatetotitle</code></td><td>—</td><td>Set to <code>true</code> to append the publish date to each episode title.</td></tr>
                         <tr><td><code>singleepisode</code></td><td>—</td><td>A GUID string. If provided, only that episode is shown — the full episode list is hidden.</td></tr>
+                        <tr><td><code>startepisode</code></td><td>—</td><td>A GUID string. Starts on that episode and keeps the episode list. Ignored when <code>singleepisode</code> is set.</td></tr>
                     </tbody>
                 </table>
 
@@ -522,6 +767,8 @@ final class AboutPage
                     <strong>Fires on every click.</strong> The event fires even when <code>showlightbox="false"</code> is set and no lightbox opens, making it the correct hook for custom modals, analytics, or any other side effect you want to trigger on media item click.
                 </div>
 
+                <p>Elements linked with the Elementor <a href="#maw-click-action">Media API Click Action</a> tag dispatch the same event. A listener that opens its own player should check <code>showLightbox</code>, as in the last example below; otherwise it opens on top of the plugin's lightbox for every card that has one.</p>
+
                 <h3>Listening for the Event</h3>
                 <pre class="maw-code">document.addEventListener("mediaApiWidgetItemClick", (e) =&gt; {
     const { playlistName, mediaType, embedUrl, itemId, showLightbox, element } = e.detail;
@@ -536,7 +783,7 @@ final class AboutPage
                         <tr><td><code>embedUrl</code></td><td><code>string | null</code></td><td>The iframe <code>src</code> URL the lightbox would (or does) load. For YouTube: <code>https://www.youtube.com/embed/{id}</code>. For podcasts: the platform-specific embed URL. <code>null</code> if the URL cannot be determined.</td></tr>
                         <tr><td><code>itemId</code></td><td><code>string</code></td><td>YouTube video ID or podcast episode GUID.</td></tr>
                         <tr><td><code>showLightbox</code></td><td><code>boolean</code></td><td><code>true</code> when the lightbox is opening; <code>false</code> when <code>showlightbox="false"</code> is set on the shortcode.</td></tr>
-                        <tr><td><code>element</code></td><td><code>Element</code></td><td>The <code>&lt;a&gt;</code> DOM node that was clicked.</td></tr>
+                        <tr><td><code>element</code></td><td><code>Element</code></td><td>The <code>&lt;a&gt;</code> DOM node that was clicked. For a <a href="#maw-click-action">Media API Click Action</a> link, <code>element.dataset.postid</code> is the stored post's ID.</td></tr>
                     </tbody>
                 </table>
 
@@ -816,6 +1063,7 @@ if (is_wp_error($result)) {
         }
         .maw-section h3 { font-size: 1.1em; margin-top: 24px; margin-bottom: 8px; }
         .maw-section h4 { font-size: 1em; margin-top: 20px; margin-bottom: 6px; }
+        .maw-section ul { list-style: disc; margin-left: 20px; }
         .maw-about-table th { font-weight: 600; white-space: nowrap; }
         .maw-about-table td code,
         .maw-about-table th code {

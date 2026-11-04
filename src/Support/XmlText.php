@@ -170,6 +170,99 @@ final class XmlText
     }
 
     /**
+     * libxml options every RSS parse uses.
+     *
+     * LIBXML_NOCDATA merges CDATA sections into text. Without it SimpleXML keeps
+     * CDATA as a separate node type that json_encode() silently drops, so an
+     * episode whose title, description, or GUID is wrapped in CDATA — which is
+     * how most hosting platforms publish them — would be stored blank.
+     *
+     * @var int
+     */
+    public const RSS_PARSE_OPTIONS = LIBXML_NOCDATA;
+
+    /**
+     * Item fields whose attributes are dropped before the feed is converted.
+     *
+     * SimpleXML's JSON conversion loses the text of an element that also has
+     * attributes in some shapes (a `<guid isPermaLink="false">` is the common
+     * one), leaving only `{"@attributes": …}`. These fields are pure text for
+     * the plugin, so their attributes carry nothing worth keeping.
+     *
+     * @var array<int,string>
+     */
+    private const TEXT_ITEM_FIELDS = ['guid', 'title', 'description', 'link', 'pubDate'];
+
+    /**
+     * Namespaced elements used when an episode's <description> is empty, in
+     * order of preference: itunes:summary, then content:encoded.
+     *
+     * @var array<int,array{0:string,1:string}>
+     */
+    private const DESCRIPTION_FALLBACKS = [
+        ['http://www.itunes.com/dtds/podcast-1.0.dtd', 'summary'],
+        ['http://purl.org/rss/1.0/modules/content/', 'encoded'],
+    ];
+
+    /**
+     * Makes an RSS document's per-episode text fields survive JSON conversion.
+     *
+     * Strips attributes from each item's text fields in place, so the stored
+     * feed holds `"guid": "abc"` rather than an attribute array with the
+     * identifier missing. A stable GUID is what keeps an episode's stored post
+     * (and its enrichment) attached to the same episode across refreshes.
+     *
+     * @param \SimpleXMLElement $xml Parsed RSS document.
+     * @return void
+     */
+    public static function normalizeFeedItems(\SimpleXMLElement $xml): void
+    {
+        if (!isset($xml->channel) || !isset($xml->channel->item)) {
+            return;
+        }
+
+        foreach ($xml->channel->item as $item) {
+            // Many feeds put the episode text only in iTunes or content
+            // namespaces, which the stored array shape cannot carry. Promote it
+            // into an empty <description> so the description survives.
+            if (trim((string) ($item->description ?? '')) === '') {
+                foreach (self::DESCRIPTION_FALLBACKS as [$namespace, $element]) {
+                    $text = trim((string) $item->children($namespace)->{$element});
+                    if ($text !== '') {
+                        $item->description = $text;
+                        break;
+                    }
+                }
+            }
+
+            foreach (self::TEXT_ITEM_FIELDS as $field) {
+                if (!isset($item->{$field})) {
+                    continue;
+                }
+
+                $node = $item->{$field};
+                if (count($node->attributes()) === 0) {
+                    continue;
+                }
+
+                if (function_exists('dom_import_simplexml')) {
+                    $dom = dom_import_simplexml($node);
+                    while ($dom->attributes !== null && $dom->attributes->length > 0) {
+                        $dom->removeAttributeNode($dom->attributes->item(0));
+                    }
+                    continue;
+                }
+
+                // Without ext-dom: replace the element with a text-only one.
+                // Property assignment escapes the text itself.
+                $text = trim((string) $node);
+                unset($item->{$field});
+                $item->{$field} = $text;
+            }
+        }
+    }
+
+    /**
      * Returns a trimmed http(s) URL, or an empty string when unusable.
      *
      * @param string $raw Candidate URL.

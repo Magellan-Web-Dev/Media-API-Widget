@@ -30,10 +30,24 @@ if (!defined('ABSPATH')) { exit; }
  * second rule implementable, which is why every check uses array_key_exists()
  * rather than isset().
  *
+ * Post status is editorial, not source-controlled: an item is published when
+ * it is created, and afterwards a sync never republishes an item an editor
+ * unpublished, and never touches an item an editor moved to the Trash (nor
+ * creates a replacement for it).
+ *
  * All methods are static; this class is not intended to be instantiated.
  */
 final class PostUpserter
 {
+    /**
+     * Every status an indexed post can have, including the Trash.
+     *
+     * Listed explicitly because a query for 'any' leaves trashed posts out.
+     *
+     * @var array<int,string>
+     */
+    public const ALL_STATUSES = ['publish', 'future', 'draft', 'pending', 'private', 'trash'];
+
     /**
      * Creates or updates the post for one index record.
      *
@@ -52,7 +66,13 @@ final class PostUpserter
             return ['status' => 'failed', 'post_id' => 0, 'duplicates' => 0];
         }
 
-        [$existingId, $duplicates] = self::findBySourceKey($sourceKey);
+        [$existingId, $duplicates, $existingStatus] = self::findBySourceKey($sourceKey);
+
+        if ($existingId > 0 && $existingStatus === 'trash') {
+            // An editor trashed it: leave it alone rather than restoring it
+            // or creating a second post beside it.
+            return ['status' => 'unchanged', 'post_id' => $existingId, 'duplicates' => $duplicates];
+        }
 
         $plan = self::buildMetaPlan($record, $playlistName, $mediaType);
 
@@ -83,7 +103,11 @@ final class PostUpserter
             // when the sync lock has degraded open because no database handle
             // was available — can find this post rather than creating a second.
             update_post_meta($postId, PostIndex::META_SOURCE_KEY, $sourceKey);
+            update_option(PostIndex::OPTION_HAS_POSTS, 1, false);
         }
+
+        // Ownership marker: only posts carrying it can be removed by a sync.
+        update_post_meta($postId, PostIndex::META_MANAGED, '1');
 
         self::applyMeta($postId, $plan);
         update_post_meta($postId, PostIndex::META_LAST_SEEN, $now);
@@ -106,17 +130,21 @@ final class PostUpserter
      *
      * Asks for two rows rather than one so a duplicate can be detected. The
      * lowest id is treated as canonical and any extra is reported to the caller
-     * but left completely alone: this index never deletes or trashes a post, so
-     * surfacing the count is the correct response.
+     * but left completely alone: the only deletions are of items missing from
+     * a complete refresh (PostIndexSync), never of duplicates, so surfacing the
+     * count is the correct response.
+     *
+     * Trashed posts are included, so an item an editor trashed is recognized
+     * rather than duplicated.
      *
      * @param string $sourceKey The composite identity.
-     * @return array{0:int,1:int} [canonical post id or 0, number of extras]
+     * @return array{0:int,1:int,2:string} [canonical post id or 0, number of extras, its status]
      */
     private static function findBySourceKey(string $sourceKey): array
     {
         $ids = get_posts([
             'post_type'              => PostIndex::POST_TYPE,
-            'post_status'            => 'any',
+            'post_status'            => self::ALL_STATUSES,
             'posts_per_page'         => 2,
             'fields'                 => 'ids',
             'orderby'                => 'ID',
@@ -133,10 +161,12 @@ final class PostUpserter
         ]);
 
         if (!is_array($ids) || $ids === []) {
-            return [0, 0];
+            return [0, 0, ''];
         }
 
-        return [(int) $ids[0], max(0, count($ids) - 1)];
+        $post = get_post((int) $ids[0]);
+
+        return [(int) $ids[0], max(0, count($ids) - 1), $post !== null ? (string) $post->post_status : ''];
     }
 
     /**
@@ -152,8 +182,9 @@ final class PostUpserter
      * transcript. Updates must use wp_update_post(), and post_content must be
      * absent from the array unless the payload actually supplied a transcript.
      *
-     * post_author, post_date, and post_name are likewise never sent on an
-     * update, so the author and any editorial changes survive resyncing.
+     * post_author, post_date, post_name, and post_status are likewise never
+     * sent on an update, so the author and any editorial changes — including
+     * unpublishing an item to hide it from loops — survive resyncing.
      *
      * @param array<string,mixed> $record     An {@see ItemMapper} record.
      * @param int                 $existingId Post being updated, or 0 to create.
@@ -163,7 +194,6 @@ final class PostUpserter
     {
         $postarr = [
             'post_type'      => PostIndex::POST_TYPE,
-            'post_status'    => 'publish',
             'post_title'     => (string) ($record['title'] ?? ''),
             'post_excerpt'   => (string) ($record['excerpt'] ?? ''),
             'menu_order'     => (int) ($record['position'] ?? 0),
@@ -183,7 +213,10 @@ final class PostUpserter
             return $postarr;
         }
 
-        // Creating. wp_insert_post() does not merge, so the body must be given
+        // Creating: published, so builder loops list it straight away.
+        $postarr['post_status'] = 'publish';
+
+        // wp_insert_post() does not merge, so the body must be given
         // explicitly — an empty string when there is no transcript yet.
         $postarr['post_content'] = !empty($record['has_transcript'])
             ? wp_kses_post((string) ($record['transcript'] ?? ''))
@@ -228,6 +261,8 @@ final class PostUpserter
             PostIndex::META_PODCAST_GUID   => (string) ($record['podcast_guid'] ?? ''),
             PostIndex::META_THUMBNAIL_URL  => (string) ($record['thumbnail_url'] ?? ''),
             PostIndex::META_PUBLISHED_DATE => (string) ($record['published_date'] ?? ''),
+            PostIndex::META_MEDIA_URL      => (string) ($record['media_url'] ?? ''),
+            PostIndex::META_AUDIO_URL      => (string) ($record['audio_url'] ?? ''),
         ];
 
         $transcriptFields = $record['transcript_fields'] ?? [];
@@ -330,10 +365,6 @@ final class PostUpserter
             return false;
         }
 
-        if ((string) $post->post_status !== 'publish') {
-            return false;
-        }
-
         if (!empty($record['has_transcript'])
             && (string) $post->post_content !== wp_kses_post((string) ($record['transcript'] ?? ''))) {
             return false;
@@ -341,6 +372,10 @@ final class PostUpserter
 
         $existing = get_post_meta($postId);
         $existing = is_array($existing) ? $existing : [];
+
+        if (!isset($existing[PostIndex::META_MANAGED])) {
+            return false;
+        }
 
         foreach ($plan['write'] as $metaKey => $value) {
             if ($metaKey === PostIndex::META_LAST_SEEN) {

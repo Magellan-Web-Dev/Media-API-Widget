@@ -1,6 +1,8 @@
 <?php
 namespace MediaApiWidget\Integrations\Elementor;
 
+use MediaApiWidget\PostIndex\PostIndex;
+
 if (!defined('ABSPATH')) { exit; }
 
 /**
@@ -67,6 +69,59 @@ final class Integration
         add_action('elementor/widgets/register', [$this, 'registerWidgets']);
         add_action('elementor/frontend/after_register_scripts', [$this, 'registerScripts']);
         add_action('elementor/editor/after_enqueue_scripts', [$this, 'enqueueEditorScripts']);
+
+        // Stored playlist posts: Loop Grid source + "Media API" dynamic tags.
+        add_filter('elementor_pro/utils/get_public_post_types', [$this, 'addMediaItemPostType']);
+        add_action('elementor/dynamic_tags/register', [$this, 'registerDynamicTags']);
+    }
+
+    /**
+     * Makes stored media items a Loop Grid / Posts source and a loop template
+     * "Preview as" choice.
+     *
+     * Elementor Pro builds both lists from post types with `show_in_nav_menus`,
+     * which media items deliberately leave off (they have no front-end URL to
+     * put in a menu). Adding the type through Elementor's own filter targets
+     * exactly those lists. Only added while a playlist stores posts, or posts
+     * were stored before.
+     *
+     * @param mixed $postTypes Post type => label.
+     * @return mixed Post types, with media items when in use.
+     */
+    public function addMediaItemPostType($postTypes)
+    {
+        if (!is_array($postTypes) || !PostIndex::isRegistered() || !PostIndex::shouldShowMenu()) {
+            return $postTypes;
+        }
+
+        $object = get_post_type_object(PostIndex::POST_TYPE);
+        $postTypes[PostIndex::POST_TYPE] = $object !== null ? (string) $object->label : 'Media API Items';
+
+        return $postTypes;
+    }
+
+    /**
+     * Registers the "Media API" dynamic tags: Field, Image, and URL.
+     *
+     * @param object $dynamicTags Elementor dynamic tags manager.
+     * @return void
+     */
+    public function registerDynamicTags($dynamicTags): void
+    {
+        if (!is_object($dynamicTags) || !method_exists($dynamicTags, 'register')
+            || !class_exists('Elementor\\Core\\DynamicTags\\Tag') || !class_exists('Elementor\\Core\\DynamicTags\\Data_Tag')
+            || !class_exists('Elementor\\Modules\\DynamicTags\\Module')) {
+            return;
+        }
+
+        if (method_exists($dynamicTags, 'register_group')) {
+            $dynamicTags->register_group(DynamicTags\Groups::GROUP, ['title' => __('Media API', 'media-api-widget')]);
+        }
+
+        $dynamicTags->register(new DynamicTags\MediaFieldTag());
+        $dynamicTags->register(new DynamicTags\MediaImageTag());
+        $dynamicTags->register(new DynamicTags\MediaUrlTag());
+        $dynamicTags->register(new DynamicTags\MediaClickTag());
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace MediaApiWidget\PostIndex;
 
+use MediaApiWidget\Admin\Menu;
 use MediaApiWidget\Support\MediaStore;
 
 if (!defined('ABSPATH')) { exit; }
@@ -20,11 +21,19 @@ if (!defined('ABSPATH')) { exit; }
  * from stored data by {@see PostIndexSync}, and deleting them all costs nothing
  * but a resync. Nothing in the media pipeline reads them.
  *
+ * Posts exist only for playlists whose media item enables "Store playlist
+ * items as WordPress posts"; every synchronization entry point checks that
+ * setting. One post is kept per item per playlist, so the same video in two
+ * playlists has two posts with independent membership and position.
+ *
  * Visibility is deliberately "index-only, builder-discoverable":
  *
- * - `public => true` because Elementor, Divi, and Bricks all enumerate loop
- *   sources with `get_post_types(['public' => true])`. Registering privately
- *   would satisfy the letter of "index" while making the feature unusable.
+ * - `public => true` so builders and query tools that enumerate public types
+ *   can find it. Elementor Pro is stricter — its Loop Grid sources and loop
+ *   "Preview as" list require `show_in_nav_menus` — and the Elementor
+ *   integration adds the type through Elementor's own filter instead of
+ *   putting media items into Appearance → Menus, where their links would not
+ *   resolve.
  * - `publicly_queryable => false` because the index needs no front-end URL of
  *   its own. This is the flag `is_post_type_viewable()` consults, so it removes
  *   the admin "View" link, the REST link preview, and URL-driven access, while
@@ -135,6 +144,29 @@ final class PostIndex
     /** @var string GMT timestamp of the last sync that saw this item. */
     public const META_LAST_SEEN = 'maw_last_seen';
 
+    /** @var string Link to the item: the YouTube watch URL, or the episode page (falling back to its audio). */
+    public const META_MEDIA_URL = 'maw_media_url';
+
+    /** @var string Podcast episode audio file (enclosure) URL; absent for YouTube. */
+    public const META_AUDIO_URL = 'maw_audio_url';
+
+    /**
+     * Internal marker set on every post the index writes. Ownership for removal
+     * is established by the protected source key (see PostIndexSync), which
+     * every generated post has carried since the index's first version.
+     *
+     * @var string
+     */
+    public const META_MANAGED = '_maw_managed';
+
+    /**
+     * Option set once the index has created a post, so the admin menu stays
+     * available for retained posts after storage is switched off.
+     *
+     * @var string
+     */
+    public const OPTION_HAS_POSTS = 'maw_post_index_has_posts';
+
     /**
      * Option holding the index schema version.
      *
@@ -164,6 +196,113 @@ final class PostIndex
     public function register(): void
     {
         add_action('init', [self::class, 'registerTypes'], 9);
+        add_action('pre_get_posts', [self::class, 'applyDefaultOrder']);
+        add_filter('rest_prepare_' . self::POST_TYPE, [self::class, 'restNullUnknownNumbers'], 10, 2);
+        // Post Types Order (autosort) prepends menu_order to every query.
+        add_filter('pto/posts_orderby/ignore', [self::class, 'keepExplicitOrder'], 10, 3);
+    }
+
+    /**
+     * Lets an explicit ordering of media items survive Post Types Order.
+     *
+     * With its "Auto Sort" option on, Post Types Order prepends menu_order to
+     * every front-end query, which would silently override a builder's "Order
+     * By: Title" (or random, a meta value…) for media items. Queries for media
+     * items that ask for anything other than the default/playlist order are
+     * therefore exempted. Default queries are unaffected: they are already in
+     * playlist order, which is menu_order.
+     *
+     * @param mixed  $ignore  Whether Post Types Order should leave the query alone.
+     * @param string $orderBy SQL ORDER BY clause.
+     * @param object $query   The WP_Query.
+     * @return mixed True to exempt the query, otherwise the incoming value.
+     */
+    public static function keepExplicitOrder($ignore, $orderBy = '', $query = null)
+    {
+        if (!is_object($query) || !method_exists($query, 'get')) {
+            return $ignore;
+        }
+
+        $postType = $query->get('post_type');
+        if (is_array($postType) && count($postType) === 1) {
+            $postType = reset($postType);
+        }
+
+        if ($postType !== self::POST_TYPE) {
+            return $ignore;
+        }
+
+        $orderby = $query->get('orderby');
+        $default = ['menu_order' => 'ASC', 'date' => 'DESC'];
+
+        if (in_array($orderby, ['', null, 'menu_order', 'menu_order date', 'date', 'post_date'], true) || $orderby === $default) {
+            return $ignore;
+        }
+
+        return true;
+    }
+
+    /**
+     * Filter: whether front-end media item queries ordered by date default to
+     * playlist order. Return false to keep plain date ordering.
+     *
+     * @var string
+     */
+    public const FILTER_DEFAULT_ORDER = 'media_api_widget_post_index_default_order';
+
+    /**
+     * Lists media items in playlist order when a query asks only for the
+     * default date order.
+     *
+     * Stored posts carry their playlist position as menu_order (0 = first), and
+     * that position is the plugin's own order: newest season/episode first for
+     * numbered playlists, the source's order otherwise. Elementor's Loop Grid —
+     * like WP_Query itself — defaults to "Date, descending", which would ignore
+     * that. So a front-end query for media items alone whose ordering is still
+     * the date default is ordered by position first, then by date.
+     *
+     * Any other ordering a query asks for (title, menu order, random, a meta
+     * value…) is left alone, as are admin screens and REST requests. Sites that
+     * want the plain date default can return false from
+     * `media_api_widget_post_index_default_order`.
+     *
+     * @param object $query The WP_Query being prepared (anything with get()/set()).
+     * @return void
+     */
+    public static function applyDefaultOrder($query): void
+    {
+        if (!is_object($query) || !method_exists($query, 'get') || !method_exists($query, 'set')) {
+            return;
+        }
+
+        if ((is_admin() && !wp_doing_ajax()) || (defined('REST_REQUEST') && REST_REQUEST)) {
+            return;
+        }
+
+        $postType = $query->get('post_type');
+        if (is_array($postType) && count($postType) === 1) {
+            $postType = reset($postType);
+        }
+
+        if ($postType !== self::POST_TYPE) {
+            return;
+        }
+
+        $orderby = $query->get('orderby');
+        if (!in_array($orderby, ['', null, 'date', 'post_date'], true)) {
+            return;
+        }
+
+        // "Date, ascending" is never a default; honor it as an explicit choice.
+        if (strtoupper((string) $query->get('order')) === 'ASC') {
+            return;
+        }
+
+        if (!apply_filters(self::FILTER_DEFAULT_ORDER, true, $query)) {
+            return;
+        }
+
+        $query->set('orderby', ['menu_order' => 'ASC', 'date' => 'DESC']);
     }
 
     /**
@@ -218,11 +357,81 @@ final class PostIndex
             self::META_EPISODE,
             self::META_SEASON,
             self::META_PLAYLIST_POSITION,
+            self::META_MEDIA_URL,
+            self::META_AUDIO_URL,
             self::META_TRANSCRIPT_STATUS,
             self::META_TRANSCRIPT_URL,
             self::META_TRANSCRIPT_LANGUAGE,
             self::META_LAST_SEEN,
         ];
+    }
+
+    /**
+     * Returns a label and description for every public field.
+     *
+     * Shared by meta registration (REST schema), the admin, and builder
+     * integrations, so a field is described the same way everywhere.
+     *
+     * @return array<string,array{0:string,1:string}> Meta key => [label, description].
+     */
+    public static function fieldLabels(): array
+    {
+        return [
+            self::META_PLAYLIST_NAME       => ['Playlist', 'The playlist_name this item was stored from.'],
+            self::META_MEDIA_TYPE          => ['Media type', '"youtube" or "podcast".'],
+            self::META_SOURCE_ID           => ['ID', 'The item\'s ID at its source: the YouTube video ID, or the podcast episode ID (the episode GUID from the feed; for an episode without one, its audio URL, page URL, or a content hash).'],
+            self::META_YOUTUBE_ID          => ['YouTube video ID', 'Case-sensitive YouTube video ID. Absent for podcasts.'],
+            self::META_PODCAST_GUID        => ['Podcast GUID', 'The episode GUID from the feed. Absent for YouTube.'],
+            self::META_THUMBNAIL_URL       => ['Image URL', 'Remote thumbnail image URL. Not imported into the Media Library.'],
+            self::META_PUBLISHED_DATE      => ['Published date', 'Publication date (ISO 8601 when parseable).'],
+            self::META_EPISODE             => ['Episode', 'Episode number. Absent when it cannot be determined.'],
+            self::META_SEASON              => ['Season', 'Season number. Absent when it cannot be determined.'],
+            self::META_PLAYLIST_POSITION   => ['Playlist position', 'Zero-based position in the playlist order (also the post menu order).'],
+            self::META_MEDIA_URL           => ['Media URL', 'YouTube watch URL, or the podcast episode page (its audio file when there is no page).'],
+            self::META_AUDIO_URL           => ['Audio URL', 'Podcast episode audio file URL. Absent for YouTube.'],
+            self::META_TRANSCRIPT_STATUS   => ['Transcript status', 'Transcript workflow status set by an integration.'],
+            self::META_TRANSCRIPT_URL      => ['Transcript URL', 'URL of a transcript held outside WordPress.'],
+            self::META_TRANSCRIPT_LANGUAGE => ['Transcript language', 'BCP 47 language tag of the transcript.'],
+            self::META_LAST_SEEN           => ['Last seen', 'Unix time of the last synchronization that saw this item.'],
+        ];
+    }
+
+    /**
+     * Returns the fields a synchronization owns and rewrites on every run.
+     *
+     * Post title and excerpt are source-controlled too. Everything else —
+     * post content (transcripts), transcript meta, post status, other custom
+     * fields — belongs to editors and integrations and is never overwritten.
+     *
+     * @return array<int,string> Meta keys.
+     */
+    public static function sourceControlledMetaKeys(): array
+    {
+        return [
+            self::META_PLAYLIST_NAME,
+            self::META_MEDIA_TYPE,
+            self::META_SOURCE_ID,
+            self::META_YOUTUBE_ID,
+            self::META_PODCAST_GUID,
+            self::META_THUMBNAIL_URL,
+            self::META_PUBLISHED_DATE,
+            self::META_EPISODE,
+            self::META_SEASON,
+            self::META_PLAYLIST_POSITION,
+            self::META_MEDIA_URL,
+            self::META_AUDIO_URL,
+        ];
+    }
+
+    /**
+     * Returns whether the admin menu for stored posts should be shown.
+     *
+     * @return bool True when any playlist stores posts, or posts were created.
+     */
+    public static function shouldShowMenu(): bool
+    {
+        return \MediaApiWidget\Config\Options::postStoragePlaylists() !== []
+            || (bool) get_option(self::OPTION_HAS_POSTS, false);
     }
 
     /**
@@ -234,9 +443,9 @@ final class PostIndex
     {
         $args = [
             'labels' => [
-                'name'               => 'Media Items',
+                'name'               => 'Media API Items',
                 'singular_name'      => 'Media Item',
-                'menu_name'          => 'Media Items',
+                'menu_name'          => 'Media API Items',
                 'all_items'          => 'All Media Items',
                 'edit_item'          => 'Edit Media Item',
                 'view_item'          => 'View Media Item',
@@ -256,13 +465,15 @@ final class PostIndex
             'query_var'           => false,
 
             'show_ui'           => true,
-            'show_in_menu'      => true,
+            // Listed inside the plugin's own "Media API" menu (as "All Media
+            // Items", beside the per-playlist views), and only once a playlist
+            // stores posts, so sites not using the feature see no empty entry.
+            'show_in_menu'      => self::shouldShowMenu() ? Menu::SLUG : false,
             'show_in_admin_bar' => false,
-            // An item with no viewable URL has no business in a nav menu. This
-            // does not affect builder loop pickers, which key off 'public'.
+            // An item with no viewable URL has no business in a nav menu.
+            // Elementor Pro keys its loop sources off this flag, so the
+            // Elementor integration adds the type through its own filter.
             'show_in_nav_menus' => false,
-            'menu_position'     => 25,
-            'menu_icon'         => 'dashicons-playlist-video',
 
             'show_in_rest'   => true,
             'rest_base'      => 'maw-media-items',
@@ -274,6 +485,9 @@ final class PostIndex
 
             'hierarchical'     => false,
             'capability_type'  => 'post',
+            // Items are created by synchronization only; editors may still
+            // edit, unpublish, or enrich them.
+            'capabilities'     => ['create_posts' => 'do_not_allow'],
             'map_meta_cap'     => true,
             'can_export'       => true,
             'delete_with_user' => false,
@@ -311,8 +525,15 @@ final class PostIndex
             'publicly_queryable' => false,
             'hierarchical'       => false,
             'show_ui'            => true,
+            // Terms are created and assigned by synchronization; listing them
+            // as "Playlists" in the menu would be mistaken for the page where
+            // playlists are configured (Media API → Settings). They still drive
+            // the list filters, admin columns, REST, and builder queries.
+            'show_in_menu'       => false,
             'show_admin_column'  => true,
-            'show_in_quick_edit' => true,
+            // Assigned by synchronization only: no term box or Quick Edit field.
+            'show_in_quick_edit' => false,
+            'meta_box_cb'        => false,
             'show_in_nav_menus'  => false,
             'show_in_rest'       => true,
             'query_var'          => true,
@@ -380,18 +601,59 @@ final class PostIndex
             self::META_LAST_SEEN,
         ];
 
+        $labels = self::fieldLabels();
+
         foreach (self::publicMetaKeys() as $metaKey) {
-            register_post_meta(self::POST_TYPE, $metaKey, [
-                'type'   => in_array($metaKey, $integerKeys, true) ? 'integer' : 'string',
-                'single' => true,
+            $args = [
+                'type'        => in_array($metaKey, $integerKeys, true) ? 'integer' : 'string',
+                'label'       => $labels[$metaKey][0] ?? $metaKey,
+                'description' => $labels[$metaKey][1] ?? '',
+                'single'      => true,
                 'show_in_rest' => true,
                 // Routed through the same helper the storage layer uses, so a
                 // value written by the index and a value written over REST are
                 // sanitized identically.
                 'sanitize_callback' => static fn ($value) => self::sanitizeMetaValue($metaKey, $value),
                 'auth_callback'     => [self::class, 'canEditPost'],
-            ]);
+            ];
+
+            register_post_meta(self::POST_TYPE, $metaKey, $args);
         }
+    }
+
+    /**
+     * Reports season and episode as null over REST when they are not stored.
+     *
+     * They are left absent when they cannot be determined, but core's REST
+     * meta controller substitutes 0 for a missing integer before any prepare
+     * callback runs, which would read as "episode 0". A registered default
+     * would leak into get_post_meta() for every other reader, so the response
+     * is corrected here instead: null exactly when no meta row exists.
+     *
+     * @param mixed $response WP_REST_Response for one media item.
+     * @param mixed $post     The post.
+     * @return mixed The response.
+     */
+    public static function restNullUnknownNumbers($response, $post)
+    {
+        if (!is_object($response) || !method_exists($response, 'get_data') || !is_object($post) || empty($post->ID)) {
+            return $response;
+        }
+
+        $data = $response->get_data();
+        if (!isset($data['meta']) || !is_array($data['meta'])) {
+            return $response;
+        }
+
+        foreach ([self::META_SEASON, self::META_EPISODE] as $metaKey) {
+            if (array_key_exists($metaKey, $data['meta']) && !metadata_exists('post', (int) $post->ID, $metaKey)) {
+                $data['meta'][$metaKey] = null;
+            }
+        }
+
+        $response->set_data($data);
+
+        return $response;
     }
 
     /**
@@ -422,6 +684,8 @@ final class PostIndex
             self::META_EPISODE             => [self::class, 'sanitizeNonNegativeInt'],
             self::META_SEASON              => [self::class, 'sanitizeNonNegativeInt'],
             self::META_PLAYLIST_POSITION   => [self::class, 'sanitizeNonNegativeInt'],
+            self::META_MEDIA_URL           => [self::class, 'sanitizeUrl'],
+            self::META_AUDIO_URL           => [self::class, 'sanitizeUrl'],
             self::META_TRANSCRIPT_STATUS   => [self::class, 'sanitizeSlug'],
             self::META_TRANSCRIPT_URL      => [self::class, 'sanitizeUrl'],
             self::META_TRANSCRIPT_LANGUAGE => [self::class, 'sanitizeLanguage'],

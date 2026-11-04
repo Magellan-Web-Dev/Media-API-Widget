@@ -81,6 +81,15 @@ final class MawTestPosts
     /** @var bool When true, wp_update_post() fails. */
     public static bool $failUpdates = false;
 
+    /** @var bool When true, wp_delete_post() fails. */
+    public static bool $failDeletes = false;
+
+    /** @var array<int,int> Post IDs passed to wp_delete_post(), in order. */
+    public static array $deleteLog = [];
+
+    /** @var bool Value returned by wp_verify_nonce() / check_admin_referer(). */
+    public static bool $nonceValid = true;
+
     /** @var bool Value returned by current_user_can('manage_options'). */
     public static bool $canManageOptions = true;
 
@@ -120,6 +129,9 @@ final class MawTestPosts
 
         self::$failInserts      = false;
         self::$failUpdates      = false;
+        self::$failDeletes      = false;
+        self::$deleteLog        = [];
+        self::$nonceValid       = true;
         self::$canManageOptions = true;
         self::$isAdmin          = false;
         self::$doingCron        = false;
@@ -293,6 +305,31 @@ function wp_update_post(array $postarr, bool $wpError = false)
     MawTestPosts::$posts[$id] = array_merge(MawTestPosts::$posts[$id], wp_unslash($postarr));
 
     return $id;
+}
+
+/**
+ * Deletes a post with its meta and term relationships.
+ *
+ * @param int  $postId      Post ID.
+ * @param bool $forceDelete Ignored: always a permanent delete here.
+ * @return object|false|null The deleted post, false on failure, null when absent.
+ */
+function wp_delete_post(int $postId = 0, bool $forceDelete = false)
+{
+    MawTestPosts::$deleteLog[] = $postId;
+
+    if (!isset(MawTestPosts::$posts[$postId])) {
+        return null;
+    }
+
+    if (MawTestPosts::$failDeletes) {
+        return false;
+    }
+
+    $post = (object) MawTestPosts::$posts[$postId];
+    unset(MawTestPosts::$posts[$postId], MawTestPosts::$meta[$postId], MawTestPosts::$objectTerms[$postId]);
+
+    return $post;
 }
 
 /**
@@ -938,18 +975,7 @@ function wp_doing_cron(): bool
 // Sanitizers and context
 // ---------------------------------------------------------------------------
 
-/**
- * @param string $str Text to sanitize.
- * @return string Tag-free, control-character-free, trimmed text.
- */
-function sanitize_text_field(string $str): string
-{
-    $clean = strip_tags($str);
-    $clean = (string) preg_replace('/[\r\n\t]+/', ' ', $clean);
-    $clean = (string) preg_replace('/[\x00-\x1F\x7F]/u', '', $clean);
-
-    return trim((string) preg_replace('/ {2,}/', ' ', $clean));
-}
+// sanitize_text_field() is provided by bootstrap.php.
 
 /**
  * Converts a string to a slug.
@@ -1035,4 +1061,98 @@ function has_action(string $tag, $callback = false)
     }
 
     return min(array_keys(MawTestState::$hooks[$tag]));
+}
+
+if (!function_exists('sanitize_textarea_field')) {
+    /**
+     * Like core: tags and control characters removed, line breaks kept.
+     *
+     * @param string $str Text.
+     * @return string
+     */
+    function sanitize_textarea_field(string $str): string
+    {
+        $clean = strip_tags(str_replace("\r\n", "\n", $str));
+        $clean = (string) preg_replace('/[^\S\n]+/', ' ', $clean);
+        $clean = (string) preg_replace('/[\x00-\x09\x0B-\x1F\x7F]/u', '', $clean);
+
+        return trim($clean);
+    }
+}
+
+if (!function_exists('wp_create_nonce')) {
+    /**
+     * Deterministic nonce bound to its action and the current user, so a test
+     * can prove a nonce minted for one playlist or action is refused for another.
+     *
+     * @param string|int $action Nonce action.
+     * @return string Nonce.
+     */
+    function wp_create_nonce($action = -1): string
+    {
+        return substr(md5('maw-test-nonce|' . $action . '|' . MawTestPosts::$currentUserId), 0, 10);
+    }
+}
+
+if (!function_exists('wp_verify_nonce')) {
+    /**
+     * @param mixed      $nonce  Nonce to check.
+     * @param string|int $action Nonce action.
+     * @return int|false 1 when valid for this action (and $nonceValid is on), else false.
+     */
+    function wp_verify_nonce($nonce, $action = -1)
+    {
+        return MawTestPosts::$nonceValid && is_string($nonce) && hash_equals(wp_create_nonce($action), $nonce) ? 1 : false;
+    }
+}
+
+if (!function_exists('metadata_exists')) {
+    /**
+     * @param string $metaType Object type; only 'post' is stored here.
+     * @param int    $objectId Object ID.
+     * @param string $metaKey  Meta key.
+     * @return bool Whether a row exists, whatever its value.
+     */
+    function metadata_exists(string $metaType, int $objectId, string $metaKey): bool
+    {
+        return $metaType === 'post' && isset(MawTestPosts::$meta[$objectId][$metaKey]);
+    }
+}
+
+if (!function_exists('admin_url')) {
+    /**
+     * @param string $path Path relative to the admin URL.
+     * @return string Admin URL.
+     */
+    function admin_url(string $path = ''): string
+    {
+        return 'https://example.test/wp-admin/' . ltrim($path, '/');
+    }
+}
+
+if (!function_exists('sanitize_hex_color')) {
+    /**
+     * Like core: a 3- or 6-digit hex color with "#", or ''.
+     *
+     * @param string $color Candidate.
+     * @return string|null Color, '' for an empty input, null when invalid.
+     */
+    function sanitize_hex_color($color)
+    {
+        if ($color === '') {
+            return '';
+        }
+
+        return preg_match('|^#([A-Fa-f0-9]{3}){1,2}$|', (string) $color) ? (string) $color : null;
+    }
+}
+
+if (!function_exists('get_current_screen')) {
+    /**
+     * @return object|null The screen a test set in $GLOBALS['maw_test_screen'].
+     */
+    function get_current_screen()
+    {
+        return $GLOBALS['maw_test_screen'] ?? null;
+    }
 }

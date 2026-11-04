@@ -37,6 +37,7 @@ final class DataParams
      * - font             — Google Fonts font name.
      * - adddatetotitle   — if present, the publish date is appended to each title.
      * - singleepisode    — GUID string; hides the episode list and jumps to that GUID.
+     * - startepisode     — GUID string; starts at that episode and keeps the list.
      * - autoplay         — starts playback when set to a truthy value.
      *
      * On error (missing URL, unreachable feed, unparseable XML, or an
@@ -96,6 +97,7 @@ final class DataParams
         $trackSelected = $trackSelected !== 0 ? $trackSelected - 1 : 0;
 
         $singleEpisode  = ($params['singleepisode'] ?? null) !== null ? (string) $params['singleepisode'] : 'false';
+        $startEpisode   = (string) ($params['startepisode'] ?? '');
         $addDateToTitle = $params['adddatetotitle'] ?? null;
         $autoplay       = filter_var($params['autoplay'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
@@ -178,6 +180,8 @@ final class DataParams
                     }
 
                     if ($singleEpisode !== 'false' && (string) $item->guid === $singleEpisode) {
+                        $trackSelected = $itemIteration;
+                    } elseif ($singleEpisode === 'false' && $startEpisode !== '' && (string) $item->guid === $startEpisode) {
                         $trackSelected = $itemIteration;
                     }
                     $itemIteration++;

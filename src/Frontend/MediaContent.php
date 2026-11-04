@@ -2,9 +2,12 @@
 namespace MediaApiWidget\Frontend;
 
 use MediaApiWidget\Config\Options;
+use MediaApiWidget\PostIndex\RefreshManifest;
 use MediaApiWidget\Support\BackupFiles;
 use MediaApiWidget\Support\MediaStore;
+use MediaApiWidget\Support\PodcastNumbering;
 use MediaApiWidget\Support\SafeRemoteRequest;
+use MediaApiWidget\Support\XmlText;
 use MediaApiWidget\Support\YoutubeGuard;
 
 if (!defined('ABSPATH')) { exit; }
@@ -242,10 +245,14 @@ final class MediaContent
             // Warnings are suppressed rather than raised: a malformed third-party
             // feed is an expected failure that returns null, not a PHP notice in
             // the middle of wp_head.
-            $parsedRssFeed = @simplexml_load_string($rssBody);
+            $parsedRssFeed = @simplexml_load_string($rssBody, 'SimpleXMLElement', XmlText::RSS_PARSE_OPTIONS);
             if (!$parsedRssFeed) {
                 return null;
             }
+
+            // CDATA titles/descriptions and attributed GUIDs otherwise vanish
+            // when the feed is converted to the stored array shape.
+            XmlText::normalizeFeedItems($parsedRssFeed);
 
             $parsedRssFeed->channel->rssUrl = $rssUrl;
             $parsedRssFeed->channel->collectionViewUrl = $appleData && !empty(get_object_vars($getRssData)['results'][0]->collectionViewUrl)
@@ -341,6 +348,7 @@ final class MediaContent
             'sort_mode' => $params['sort_mode'] ?? 'normal',
             'season_episode_regex_enabled' => $params['season_episode_regex_enabled'] ?? false,
             'season_episode_regex' => $params['season_episode_regex'] ?? '',
+            'podcast_sort_mode' => $params['podcast_sort_mode'] ?? PodcastNumbering::SORT_SEASON_EPISODE,
             'load_full_playlist' => $params['load_full_playlist'] ?? false,
             'cookie_name' => $params['cookie_name'] ?? null,
             'cookie_expired' => $params['cookie_expired'] ?? true,
@@ -520,6 +528,19 @@ final class MediaContent
                 return;
             }
 
+            // Post storage: every page was fetched, so the complete parsed
+            // playlist — before the six-item limit — is reliable source
+            // membership. It is recorded (only if storage is enabled, and only
+            // once the store below succeeds) as the refresh manifest that may
+            // authorize removing posts for items that left the playlist.
+            $afterWrite = null;
+            if (Options::isPostStorageEnabled((string) $playlistName, 'youtube')) {
+                $completeItems = $loadFullPlaylist === true
+                    ? $parsedItems
+                    : self::parseYoutubeItems($fetch['items'], $sortMode, $useSeasonEpisode, $seasonEpisodeRegex, true);
+                $afterWrite = RefreshManifest::afterWriteCallback((string) $playlistName, 'youtube', $completeItems);
+            }
+
             // Every requested page completed normally, so this refresh may now
             // replace the stored data. MediaStore fires the pre-store filter,
             // validates the result, and writes both the transient and the backup
@@ -527,7 +548,7 @@ final class MediaContent
             $store = MediaStore::store(
                 MediaStore::buildContext((string) $playlistName, 'youtube', MediaStore::SOURCE_REMOTE_REFRESH),
                 $parsedItems,
-                ['ttl' => $mediaCacheTtl, 'write_backup' => true]
+                ['ttl' => $mediaCacheTtl, 'write_backup' => true, 'after_write' => $afterWrite]
             );
 
             // Render whatever was accepted for storage, so the current response
@@ -968,6 +989,10 @@ final class MediaContent
             return;
         }
 
+        // Optional season/episode numbering (and order) from the podcast's
+        // regex setting. Unchanged when the regex is not enabled.
+        $normalized = PodcastNumbering::apply($normalized, $config);
+
         $store = MediaStore::store(
             MediaStore::buildContext(
                 (string) $playlistName,
@@ -976,7 +1001,12 @@ final class MediaContent
                 (string) $podcastPlatform
             ),
             $normalized,
-            ['ttl' => $mediaCacheTtl, 'write_backup' => true]
+            [
+                'ttl'          => $mediaCacheTtl,
+                'write_backup' => true,
+                // A feed is fetched whole, so it is complete source membership.
+                'after_write'  => RefreshManifest::afterWriteCallback((string) $playlistName, 'podcast', $normalized),
+            ]
         );
 
         if ($store['data'] !== null) {

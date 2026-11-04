@@ -588,6 +588,22 @@
                     if (media_type === "youtube" && lightboxshowplaylist && !playListSorted.every(item => item.episode === -1)) {
                         playListSorted = playListSorted.filter(item => item.episode && item.episode !== -1);
                     }
+
+                    // A stored-post link (Elementor "Media API Click Action") can name a
+                    // video this page's player data does not hold, such as one beyond a
+                    // six-item playlist. Play that video on its own rather than another.
+
+                    if (itemClicked && itemClicked.dataset.mawlink === "true" && !playListSorted.some(item => item.id === itemClicked.dataset.id)) {
+                        playListSorted = [{
+                            id: itemClicked.dataset.id,
+                            title: itemClicked.dataset.mawtitle || "",
+                            episode: -1,
+                            season: -1,
+                            description: "",
+                            publishedDate: "",
+                            thumbnail: { url: "" }
+                        }];
+                    }
                     
                     // Elements To Hide When User Idle In Lightbox After 5 Seconds
 
@@ -1234,6 +1250,11 @@
                         params.set("scrollcolor", ds.podcastplayerscrollcolor || "");
                         params.set("textcolor", ds.podcastplayertextcolor || "");
                         params.set("autoplay", "1");
+                        if (ds.singleepisode) {
+                            params.set("singleepisode", ds.singleepisode);
+                        } else if (ds.startepisode) {
+                            params.set("startepisode", ds.startepisode);
+                        }
                         if (ds.showepisodedateaftertitle === "true") {
                             params.set("adddatetotitle", "true");
                         }
@@ -1425,6 +1446,712 @@
                     });
                 }
 
+// -- Media Card Carousel --
+//
+// Enhances server-rendered [data-maw-carousel] markup. The viewport is a native
+// horizontal scroll container with scroll snapping, so touch swiping, trackpad
+// and Shift+wheel scrolling, and focus scrolling are the browser's own. This
+// module adds container-based card sizing, the arrow buttons, mouse
+// click-and-drag, keyboard keys, and suppression of the click that ends a drag
+// so a drag can never open a lightbox. Cards are never cloned or re-rendered,
+// and playlist/lightbox initialization is never touched: card clicks keep going
+// to the existing delegated handlers.
+
+(function () {
+    "use strict";
+
+    var ROOT_SELECTOR  = "[data-maw-carousel]";
+    var DRAG_THRESHOLD = 6;    // px of mouse travel before a press becomes a drag
+    var SETTLE_DELAY   = 140;  // ms without scroll events that counts as settled
+    var DEFAULT_MIN    = 400;  // px, if the minimum item width cannot be resolved
+
+    if (typeof WeakMap !== "function") {
+        // Without it the markup still scrolls natively; arrows stay hidden.
+        return;
+    }
+
+    /** @type {WeakMap<Element, Carousel>} */
+    var registry = new WeakMap();
+    var uid      = 0;
+
+    function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    function reducedMotion() {
+        return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    }
+
+    function childWith(parent, attribute, value) {
+        for (var i = 0; i < parent.children.length; i++) {
+            var child = parent.children[i];
+            if (child.hasAttribute(attribute) && (value === undefined || child.getAttribute(attribute) === value)) {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    function setDisabled(button, disabled) {
+        if (disabled) {
+            button.setAttribute("aria-disabled", "true");
+        } else {
+            button.removeAttribute("aria-disabled");
+        }
+    }
+
+    function Carousel(el) {
+        this.el       = el;
+        this.viewport = childWith(el, "data-maw-carousel-viewport");
+        this.track    = this.viewport ? childWith(this.viewport, "data-maw-carousel-track") : null;
+        this.left     = childWith(el, "data-maw-carousel-arrow", "left");
+        this.right    = childWith(el, "data-maw-carousel-arrow", "right");
+        this.step     = el.getAttribute("data-maw-carousel-step") === "group" ? "group" : "item";
+
+        this.index    = 0;        // first fully visible item
+        this.visible  = 1;        // cards that fit side by side
+        this.maxIndex = 0;        // last valid first-visible item
+        this.pitch    = 0;        // card width + gap, px
+        this.mode     = "static"; // static (all fit) | gutter | overlay
+        this.rtl      = false;
+
+        this.programmatic       = false;
+        this.drag               = null;
+        this.suppressClickUntil = 0;
+        this.settleTimer        = null;
+        this.scrollFrame        = 0;
+        this.layoutFrame        = 0;
+        this.layoutKey          = "";
+        this.listeners          = [];
+        this.observer           = null;
+        this.probe              = null;
+        this.generatedId        = false;
+        this.destroyed          = false;
+        this.hasScrollEnd       = false;
+        this.labels             = null;
+    }
+
+    Carousel.prototype.on = function (target, type, handler, options) {
+        target.addEventListener(type, handler, options);
+        this.listeners.push([target, type, handler, options]);
+    };
+
+    Carousel.prototype.mount = function () {
+        var self = this;
+
+        if (!this.viewport || !this.track || !this.left || !this.right) {
+            return false;
+        }
+
+        if (!this.viewport.id) {
+            uid += 1;
+            this.viewport.id = "maw-carousel-" + uid;
+            this.generatedId = true;
+        }
+
+        this.labels = { left: this.left.getAttribute("aria-label"), right: this.right.getAttribute("aria-label") };
+        this.left.setAttribute("aria-controls", this.viewport.id);
+        this.right.setAttribute("aria-controls", this.viewport.id);
+        this.hasScrollEnd = "onscrollend" in this.viewport;
+
+        this.on(this.left, "click", function (e) { self.onArrow(e, "left"); });
+        this.on(this.right, "click", function (e) { self.onArrow(e, "right"); });
+        this.on(this.viewport, "scroll", function () { self.onScroll(); }, { passive: true });
+        if (this.hasScrollEnd) {
+            this.on(this.viewport, "scrollend", function () { self.settle(); });
+        }
+        this.on(this.viewport, "pointerdown", function (e) { self.onPointerDown(e); });
+        this.on(this.viewport, "pointermove", function (e) { self.onPointerMove(e); });
+        this.on(this.viewport, "pointerup", function (e) { self.endDrag(e); });
+        this.on(this.viewport, "pointercancel", function (e) { self.endDrag(e); });
+        this.on(this.viewport, "lostpointercapture", function (e) { self.endDrag(e); });
+        this.on(this.viewport, "dragstart", function (e) {
+            if (self.mode !== "static") {
+                e.preventDefault();
+            }
+        });
+        // Capture phase: runs before the delegated card handlers on window.
+        this.on(this.viewport, "click", function (e) { self.onClickCapture(e); }, true);
+        this.on(this.viewport, "keydown", function (e) { self.onKeydown(e); });
+        this.on(this.viewport, "focusin", function (e) { self.onFocusIn(e); });
+
+        if (typeof ResizeObserver === "function") {
+            this.observer = new ResizeObserver(function () { self.scheduleLayout(); });
+            this.observer.observe(this.el);
+        } else {
+            this.on(window, "resize", function () { self.scheduleLayout(); });
+            this.on(window, "orientationchange", function () { self.scheduleLayout(); });
+        }
+
+        this.layout(true);
+
+        return true;
+    };
+
+    Carousel.prototype.destroy = function () {
+        if (this.destroyed) {
+            return;
+        }
+        this.destroyed = true;
+
+        this.listeners.forEach(function (entry) {
+            entry[0].removeEventListener(entry[1], entry[2], entry[3]);
+        });
+        this.listeners = [];
+
+        if (this.observer) {
+            this.observer.disconnect();
+            this.observer = null;
+        }
+
+        clearTimeout(this.settleTimer);
+        if (this.scrollFrame) { cancelAnimationFrame(this.scrollFrame); }
+        if (this.layoutFrame) { cancelAnimationFrame(this.layoutFrame); }
+
+        if (this.probe && this.probe.parentNode) {
+            this.probe.parentNode.removeChild(this.probe);
+        }
+
+        // Return the markup to its server-rendered state so the same element
+        // can be initialized again cleanly.
+        this.el.style.removeProperty("--maw-carousel-item-width");
+        this.el.style.removeProperty("--maw-carousel-gutter");
+        this.el.removeAttribute("data-maw-carousel-mode");
+        this.viewport.removeAttribute("data-maw-dragging");
+        this.viewport.setAttribute("tabindex", "0");
+        if (this.generatedId) {
+            this.viewport.removeAttribute("id");
+        }
+        [this.left, this.right].forEach(function (button) {
+            button.hidden = true;
+            button.removeAttribute("aria-controls");
+            button.removeAttribute("aria-disabled");
+        });
+        if (this.labels) {
+            this.left.setAttribute("aria-label", this.labels.left);
+            this.right.setAttribute("aria-label", this.labels.right);
+        }
+
+        if (registry.get(this.el) === this) {
+            registry.delete(this.el);
+        }
+    };
+
+    Carousel.prototype.slides = function () {
+        var out = [];
+        for (var i = 0; i < this.track.children.length; i++) {
+            if (this.track.children[i].hasAttribute("data-maw-carousel-slide")) {
+                out.push(this.track.children[i]);
+            }
+        }
+        return out;
+    };
+
+    // Resolves the configured lengths (px, rem, em, %, vw, calc(), …) to px in
+    // one style read. Margin and padding percentages resolve against the
+    // carousel's width, so a percentage means a share of the carousel.
+    Carousel.prototype.measure = function () {
+        if (!this.probe || this.probe.parentNode !== this.el) {
+            var probe = this.el.ownerDocument.createElement("span");
+            probe.setAttribute("aria-hidden", "true");
+            probe.style.cssText =
+                "position:absolute;top:0;left:0;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;border:0;" +
+                "margin:0 var(--maw-carousel-gap, 48px) 0 var(--maw-carousel-min, 400px);" +
+                "padding:0 var(--maw-carousel-arrow-offset, 12px) 0 var(--maw-carousel-arrow-size, 48px);";
+            this.el.appendChild(probe);
+            this.probe = probe;
+        }
+
+        var style = window.getComputedStyle(this.probe);
+
+        return {
+            min:    parseFloat(style.marginLeft) || 0,
+            gap:    parseFloat(style.marginRight) || 0,
+            arrow:  parseFloat(style.paddingLeft) || 0,
+            offset: parseFloat(style.paddingRight) || 0
+        };
+    };
+
+    Carousel.prototype.scheduleLayout = function () {
+        var self = this;
+        if (this.destroyed || this.layoutFrame) {
+            return;
+        }
+        this.layoutFrame = requestAnimationFrame(function () {
+            self.layoutFrame = 0;
+            self.layout(false);
+        });
+    };
+
+    // Sizes the cards from the carousel's own width (not the window's):
+    // visible = max(1, floor((W + G) / (M + G))), clamped to the item count,
+    // with W split evenly between the visible cards and their gaps. When cards
+    // overflow, arrows take gutters beside the cards as long as at least two
+    // cards still fit; otherwise they overlay the cards so a single card can
+    // use the full width (shrinking below the minimum if it must).
+    Carousel.prototype.layout = function (force) {
+        if (this.destroyed || !this.el.isConnected) {
+            return;
+        }
+
+        var style  = window.getComputedStyle(this.el);
+        var width  = this.el.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+        var slides = this.slides();
+        var count  = slides.length;
+
+        if (!(width > 0)) {
+            // Hidden (display: none, collapsed tab, …): lay out once visible.
+            return;
+        }
+
+        var sizes = this.measure();
+        var key   = [width, count, sizes.min, sizes.gap, sizes.arrow, sizes.offset].join("|");
+        if (!force && key === this.layoutKey) {
+            return; // Height-only change (images loading, text wrapping).
+        }
+        this.layoutKey = key;
+
+        var min = sizes.min > 0 ? sizes.min : DEFAULT_MIN;
+        var gap = sizes.gap > 0 ? sizes.gap : 0;
+        var fit = function (available) {
+            return Math.max(1, Math.floor((available + gap) / (min + gap)));
+        };
+
+        var mode      = "static";
+        var available = width;
+        var gutter    = sizes.arrow + sizes.offset;
+        var visible   = Math.min(fit(width), Math.max(count, 1));
+
+        if (count > fit(width)) {
+            var narrowed = width - 2 * gutter;
+            if (narrowed > 0 && fit(narrowed) >= 2) {
+                mode      = "gutter";
+                available = narrowed;
+                visible   = Math.min(fit(narrowed), count);
+            } else {
+                mode    = "overlay";
+                visible = Math.min(fit(width), count);
+            }
+        }
+
+        var itemWidth = (available - (visible - 1) * gap) / visible;
+        if (!(itemWidth > 0)) {
+            visible   = 1;
+            itemWidth = available;
+        }
+
+        this.el.style.setProperty("--maw-carousel-item-width", itemWidth + "px");
+        this.el.style.setProperty("--maw-carousel-gutter", (mode === "gutter" ? gutter : 0) + "px");
+        this.el.setAttribute("data-maw-carousel-mode", mode);
+
+        this.mode     = mode;
+        this.visible  = visible;
+        this.pitch    = itemWidth + gap;
+        this.maxIndex = Math.max(0, count - visible);
+        this.rtl      = window.getComputedStyle(this.viewport).direction === "rtl";
+
+        // The left/right buttons are physical; in right-to-left content the
+        // left one moves toward the end, so their labels swap.
+        this.left.setAttribute("aria-label", this.rtl ? this.labels.right : this.labels.left);
+        this.right.setAttribute("aria-label", this.rtl ? this.labels.left : this.labels.right);
+
+        var nav = mode !== "static";
+        this.left.hidden  = !nav;
+        this.right.hidden = !nav;
+
+        // A scrollable viewport is a keyboard stop (arrow keys scroll it);
+        // one whose cards all fit is not.
+        if (nav) {
+            this.viewport.setAttribute("tabindex", "0");
+        } else if (this.viewport.ownerDocument.activeElement !== this.viewport) {
+            this.viewport.removeAttribute("tabindex");
+        }
+
+        // Keep the current first item where possible, clamped to the new range.
+        this.index = clamp(this.index, 0, this.maxIndex);
+        this.scrollToIndex(this.index, false);
+        this.update();
+    };
+
+    Carousel.prototype.position = function () {
+        var x = this.viewport.scrollLeft;
+        return this.rtl ? -x : x;
+    };
+
+    Carousel.prototype.maxScroll = function () {
+        return Math.max(0, this.viewport.scrollWidth - this.viewport.clientWidth);
+    };
+
+    // The last position is the scroll end itself, so the final card always
+    // sits flush with the viewport edge and no blank space follows it.
+    Carousel.prototype.offsetFor = function (index) {
+        var max = this.maxScroll();
+        return index >= this.maxIndex ? max : Math.min(index * this.pitch, max);
+    };
+
+    // Fractional item position: the logical target while an arrow-driven
+    // scroll is animating, the real scroll position otherwise.
+    Carousel.prototype.fraction = function () {
+        if (this.programmatic) {
+            return this.index;
+        }
+        var pos = this.position();
+        if (this.maxIndex === 0 || pos <= 1) {
+            return 0;
+        }
+        if (pos >= this.maxScroll() - 1) {
+            return this.maxIndex;
+        }
+        return this.pitch > 0 ? clamp(pos / this.pitch, 0, this.maxIndex) : 0;
+    };
+
+    Carousel.prototype.scrollToIndex = function (index, smooth) {
+        var offset   = this.offsetFor(index);
+        var left     = this.rtl ? -offset : offset;
+        var behavior = smooth && !reducedMotion() ? "smooth" : "auto";
+
+        this.programmatic = true;
+
+        if (typeof this.viewport.scrollTo === "function") {
+            this.viewport.scrollTo({ left: left, behavior: behavior });
+        } else {
+            this.viewport.scrollLeft = left;
+        }
+
+        this.armSettle(behavior === "smooth" ? 1000 : SETTLE_DELAY);
+    };
+
+    Carousel.prototype.armSettle = function (delay) {
+        var self = this;
+        clearTimeout(this.settleTimer);
+        this.settleTimer = setTimeout(function () { self.settle(); }, delay);
+    };
+
+    Carousel.prototype.onScroll = function () {
+        var self = this;
+
+        if (!this.programmatic && !this.scrollFrame) {
+            this.scrollFrame = requestAnimationFrame(function () {
+                self.scrollFrame = 0;
+                if (!self.programmatic) {
+                    self.index = Math.round(self.fraction());
+                    self.update();
+                }
+            });
+        }
+
+        // Without scrollend, a short pause in scroll events marks the end.
+        if (!this.hasScrollEnd) {
+            this.armSettle(SETTLE_DELAY);
+        }
+    };
+
+    Carousel.prototype.settle = function () {
+        clearTimeout(this.settleTimer);
+        this.settleTimer = null;
+
+        if (this.destroyed || (this.drag && this.drag.moved)) {
+            return;
+        }
+
+        this.programmatic = false;
+        if (this.viewport.hasAttribute("data-maw-dragging")) {
+            this.viewport.removeAttribute("data-maw-dragging");
+        }
+        this.index = Math.round(this.fraction());
+        this.update();
+    };
+
+    Carousel.prototype.update = function () {
+        var atStart;
+        var atEnd;
+
+        if (this.mode === "static") {
+            atStart = atEnd = true;
+        } else if (this.programmatic) {
+            atStart = this.index <= 0;
+            atEnd   = this.index >= this.maxIndex;
+        } else {
+            var pos = this.position();
+            atStart = pos <= 1;
+            atEnd   = pos >= this.maxScroll() - 1;
+        }
+
+        setDisabled(this.left, this.rtl ? atEnd : atStart);
+        setDisabled(this.right, this.rtl ? atStart : atEnd);
+    };
+
+    Carousel.prototype.goTo = function (index) {
+        var target = clamp(index, 0, this.maxIndex);
+        if (target === this.index && Math.abs(this.position() - this.offsetFor(target)) <= 1) {
+            return;
+        }
+        this.index = target;
+        this.scrollToIndex(target, true);
+        this.update();
+    };
+
+    // direction: 1 toward the end, -1 toward the start. From a position
+    // between two cards, the first step lands on the neighbouring card.
+    Carousel.prototype.go = function (direction, step) {
+        if (this.mode === "static") {
+            return;
+        }
+        var f = this.fraction();
+        this.goTo(direction > 0 ? Math.floor(f + 0.02) + step : Math.ceil(f - 0.02) - step);
+    };
+
+    Carousel.prototype.arrowStep = function () {
+        return this.step === "group" ? this.visible : 1;
+    };
+
+    Carousel.prototype.onArrow = function (event, side) {
+        event.preventDefault();
+        if (this.mode === "static" || event.currentTarget.getAttribute("aria-disabled") === "true") {
+            return;
+        }
+        var towardEnd = side === "right" ? !this.rtl : this.rtl;
+        this.go(towardEnd ? 1 : -1, this.arrowStep());
+    };
+
+    Carousel.prototype.onKeydown = function (event) {
+        if (event.target !== this.viewport || this.mode === "static" || event.altKey || event.ctrlKey || event.metaKey) {
+            return;
+        }
+
+        switch (event.key) {
+            case "ArrowLeft":
+                this.go(this.rtl ? 1 : -1, 1);
+                break;
+            case "ArrowRight":
+                this.go(this.rtl ? -1 : 1, 1);
+                break;
+            case "PageUp":
+                this.go(-1, this.visible);
+                break;
+            case "PageDown":
+                this.go(1, this.visible);
+                break;
+            case "Home":
+                this.goTo(0);
+                break;
+            case "End":
+                this.goTo(this.maxIndex);
+                break;
+            default:
+                return;
+        }
+
+        event.preventDefault();
+    };
+
+    // Focus moving onto (or into) a card that is partly or fully offscreen
+    // brings that whole card into view at a valid carousel position. focusin
+    // fires before the browser's own scroll-into-view, so the check waits a
+    // frame and works from where the card actually ended up.
+    Carousel.prototype.onFocusIn = function (event) {
+        var self   = this;
+        var target = event.target;
+        if (target === this.viewport || this.mode === "static" || !target || typeof target.closest !== "function") {
+            return;
+        }
+
+        var slide = target.closest("[data-maw-carousel-slide]");
+        if (!slide || slide.parentNode !== this.track) {
+            return;
+        }
+
+        requestAnimationFrame(function () {
+            if (self.destroyed || self.drag) {
+                return;
+            }
+
+            var box  = slide.getBoundingClientRect();
+            var view = self.viewport.getBoundingClientRect();
+            var i    = self.slides().indexOf(slide);
+
+            if (box.left < view.left - 1) {
+                self.goTo(i);
+            } else if (box.right > view.right + 1) {
+                self.goTo(i - self.visible + 1);
+            } else {
+                self.index = Math.round(self.fraction());
+                self.update();
+            }
+        });
+    };
+
+    // Mouse click-and-drag scrolling. Touch and pen use native scrolling.
+    Carousel.prototype.onPointerDown = function (event) {
+        if (event.pointerType !== "mouse" || event.button !== 0 || this.mode === "static") {
+            return;
+        }
+
+        this.drag = {
+            id:     event.pointerId,
+            x:      event.clientX,
+            dx:     0,
+            scroll: this.viewport.scrollLeft,
+            start:  Math.round(this.fraction()),
+            moved:  false
+        };
+    };
+
+    Carousel.prototype.onPointerMove = function (event) {
+        var drag = this.drag;
+        if (!drag || event.pointerId !== drag.id) {
+            return;
+        }
+
+        if (!event.buttons) {
+            // The button was released where no pointerup reached us.
+            this.endDrag(event);
+            return;
+        }
+
+        var dx = event.clientX - drag.x;
+
+        if (!drag.moved) {
+            if (Math.abs(dx) < DRAG_THRESHOLD) {
+                return;
+            }
+            drag.moved = true;
+            this.programmatic = false;
+            clearTimeout(this.settleTimer);
+            try {
+                this.viewport.setPointerCapture(event.pointerId);
+            } catch (err) {
+                // Capture is an enhancement; dragging works without it.
+            }
+            this.viewport.setAttribute("data-maw-dragging", "");
+            var selection = window.getSelection ? window.getSelection() : null;
+            if (selection && selection.removeAllRanges) {
+                selection.removeAllRanges();
+            }
+        }
+
+        drag.dx = dx;
+        this.viewport.scrollLeft = drag.scroll - dx;
+        event.preventDefault();
+    };
+
+    Carousel.prototype.endDrag = function (event) {
+        var drag = this.drag;
+        if (!drag || (event && event.pointerId !== drag.id)) {
+            return;
+        }
+        this.drag = null;
+
+        if (!drag.moved) {
+            return;
+        }
+
+        try {
+            if (this.viewport.hasPointerCapture && this.viewport.hasPointerCapture(drag.id)) {
+                this.viewport.releasePointerCapture(drag.id);
+            }
+        } catch (err) {
+            // Already released.
+        }
+
+        // The click that ends a drag is swallowed (see onClickCapture).
+        this.suppressClickUntil = Date.now() + 400;
+
+        // Snap to the nearest card; a deliberate drag that would round back to
+        // where it started moves one card in the drag direction instead.
+        var towardEnd = this.rtl ? drag.dx > 0 : drag.dx < 0;
+        var target    = Math.round(this.fraction());
+        if (target === drag.start && Math.abs(drag.dx) > Math.min(this.pitch * 0.15, 48)) {
+            target = drag.start + (towardEnd ? 1 : -1);
+        }
+
+        this.index = -1; // Force goTo to scroll even if the target is unchanged.
+        this.goTo(target);
+    };
+
+    Carousel.prototype.onClickCapture = function (event) {
+        if (Date.now() < this.suppressClickUntil) {
+            this.suppressClickUntil = 0;
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.stopImmediatePropagation) {
+                event.stopImmediatePropagation();
+            }
+        }
+    };
+
+    function carouselsIn(root) {
+        var list = Array.prototype.slice.call(root.querySelectorAll(ROOT_SELECTOR));
+        if (typeof root.matches === "function" && root.matches(ROOT_SELECTOR)) {
+            list.unshift(root);
+        }
+        return list;
+    }
+
+    function rootOrDocument(root) {
+        return root && typeof root.querySelectorAll === "function" ? root : document;
+    }
+
+    // Initializes every carousel inside root that is not initialized yet.
+    // With a signal, the carousels created by this call are destroyed (their
+    // listeners and observers released) when it aborts.
+    function initCarouselsIn(root, signal) {
+        if (signal && signal.aborted) {
+            return;
+        }
+
+        var created = [];
+        carouselsIn(rootOrDocument(root)).forEach(function (el) {
+            if (registry.has(el)) {
+                return;
+            }
+            var carousel = new Carousel(el);
+            if (carousel.mount()) {
+                registry.set(el, carousel);
+                created.push(carousel);
+            }
+        });
+
+        if (signal && created.length) {
+            signal.addEventListener("abort", function () {
+                created.forEach(function (carousel) { carousel.destroy(); });
+            }, { once: true });
+        }
+    }
+
+    // Destroys every initialized carousel inside root (and root itself).
+    function destroyCarouselsIn(root) {
+        carouselsIn(rootOrDocument(root)).forEach(function (el) {
+            var carousel = registry.get(el);
+            if (carousel) {
+                carousel.destroy();
+            }
+        });
+    }
+
+    // Public API, used by grid search (AJAX replacement) and the Elementor
+    // integration. refresh() re-measures carousels whose container changed in
+    // a way no resize reports.
+    window.mawCarousel = {
+        init: initCarouselsIn,
+        destroy: destroyCarouselsIn,
+        refresh: function (root) {
+            carouselsIn(rootOrDocument(root)).forEach(function (el) {
+                var carousel = registry.get(el);
+                if (carousel) {
+                    carousel.layout(true);
+                }
+            });
+        }
+    };
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", function () { initCarouselsIn(document); });
+    } else {
+        initCarouselsIn(document);
+    }
+})();
+
 // -- Grid Search & Pagination --
 
 (function () {
@@ -1512,7 +2239,19 @@
                     .then(function (r) { return r.json(); })
                     .then(function (data) {
                         if (data.success) {
-                            if (gridItemsEl)  gridItemsEl.innerHTML  = data.data.html;
+                            if (gridItemsEl) {
+                                // A carousel in the replaced results is released
+                                // first; the new result page's carousel starts at
+                                // its first card. Carousel arrows move within the
+                                // loaded page; the pagination loads other pages.
+                                // A response arriving after this binding was
+                                // released (Elementor re-bound the grid) still
+                                // gets a working carousel, owned by no signal.
+                                var carousels = window.mawCarousel;
+                                if (carousels) carousels.destroy(gridItemsEl);
+                                gridItemsEl.innerHTML = data.data.html;
+                                if (carousels) carousels.init(gridItemsEl, signal && !signal.aborted ? signal : undefined);
+                            }
                             if (paginationEl) paginationEl.innerHTML = data.data.pagination;
                             bindPaginationButtons();
                             // Only plain pagination is reflected in the URL; search
@@ -1618,4 +2357,137 @@
     } else {
         initMawGridSearch();
     }
+})();
+
+// -- Media item click links --
+//
+// Turns a link built by the Elementor "Media API Click Action" dynamic tag
+// (href "#maw-media-" + URL-safe base64 JSON of playlist, type, id, action…)
+// into a click on that item's media card. The anchor is given the same data attributes a card
+// carries, during the capture phase, so the playlist's own delegated handlers
+// then dispatch mediaApiWidgetItemClick and open the lightbox / player exactly
+// as they do for cards. Actions: "lightbox" (this item), "playlist" (with the
+// playlist), "event" (dispatch only). The link itself never navigates.
+
+(function () {
+    "use strict";
+
+    var PREFIX  = "#maw-media-";
+    var ACTIONS = { lightbox: true, playlist: true, event: true };
+
+    function decode(payload) {
+        try {
+            var base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+            var binary = atob(base64 + "===".slice((base64.length + 3) % 4));
+            var bytes = new Uint8Array(binary.length);
+            for (var i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            var values = JSON.parse(new TextDecoder().decode(bytes));
+            return values && typeof values === "object" ? values : null;
+        } catch (err) {
+            return null;
+        }
+    }
+
+    function parse(anchor) {
+        var href = anchor.getAttribute("href") || "";
+        var at = href.indexOf(PREFIX);
+        var values = at === -1 ? null : decode(href.slice(at + PREFIX.length));
+        if (!values) {
+            return null;
+        }
+
+        var text = function (key) { return typeof values[key] === "string" ? values[key] : ""; };
+        var playlist = text("playlist");
+        var type = text("type");
+        var id = text("id");
+
+        if (!playlist || !id || (type !== "youtube" && type !== "podcast")) {
+            return null;
+        }
+
+        return {
+            playlist: playlist,
+            type: type,
+            id: id,
+            action: ACTIONS[text("action")] ? text("action") : "lightbox",
+            post: text("post"),
+            title: text("title"),
+            color: text("color"),
+            font: text("font"),
+            logo: text("logo")
+        };
+    }
+
+    function setData(el, key, value) {
+        if (value) {
+            el.dataset[key] = value;
+        } else {
+            delete el.dataset[key];
+        }
+    }
+
+    function hasPlayer(key) {
+        var boxes = document.querySelectorAll("[data-lightboxid]");
+        for (var i = 0; i < boxes.length; i++) {
+            if (boxes[i].dataset.lightboxid === key) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    document.addEventListener("click", function (e) {
+        var target = e.target instanceof Element ? e.target : null;
+        var anchor = target ? target.closest('a[href*="#maw-media-"]') : null;
+        var link = anchor ? parse(anchor) : null;
+
+        if (!link) {
+            return;
+        }
+
+        e.preventDefault();
+
+        // In the Elementor editor a click selects the element; never play there.
+        if (document.body && document.body.classList.contains("elementor-editor-active")) {
+            return;
+        }
+
+        var audio = link.type === "podcast";
+        var key = link.playlist + "_" + link.type;
+
+        setData(anchor, "mawlink", "true");
+        setData(anchor, "itemclickable", "true");
+        setData(anchor, "itemclickableplaylist", key);
+        setData(anchor, "itemclickablemediatype", audio ? "audio" : "video");
+        setData(anchor, "id", link.id);
+        setData(anchor, "postid", link.post);
+        setData(anchor, "mawtitle", link.title);
+        setData(anchor, "showlightbox", link.action === "event" ? "false" : "");
+        // Video: adds the playlist panel. Podcast: it is what opens the player,
+        // and the episode list is kept or hidden through the player URL.
+        setData(anchor, "lightboxshowplaylist", (audio ? link.action !== "event" : link.action === "playlist") ? "true" : "");
+        setData(anchor, "singleepisode", audio && link.action === "lightbox" ? link.id : "");
+        setData(anchor, "startepisode", audio && link.action === "playlist" ? link.id : "");
+        setData(anchor, "lightboxthemecolor", link.color);
+        setData(anchor, "lightboxfont", link.font);
+        setData(anchor, "lightboxshowlogoimgurl", link.logo);
+
+        // A playlist with no player on this page (for example one removed from
+        // the settings while its posts were kept) still announces the click.
+        if (!hasPlayer(key)) {
+            document.dispatchEvent(new CustomEvent("mediaApiWidgetItemClick", {
+                bubbles: true,
+                detail: {
+                    playlistName: link.playlist,
+                    mediaType: link.type,
+                    embedUrl: audio ? null : "https://www.youtube.com/embed/" + link.id,
+                    itemId: link.id,
+                    showLightbox: false,
+                    element: anchor
+                }
+            }));
+        }
+    }, true);
 })();

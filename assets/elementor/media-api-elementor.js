@@ -14,6 +14,11 @@
  *   window.mawGridSearch, with an AbortController this file owns, so the
  *   listeners are released when Elementor re-renders or removes the widget.
  *   Grids bound by the page-load pass are never touched.
+ * - Carousels initialize once at DOM ready the same way. Carousels rendered
+ *   later are initialized here through window.mawCarousel, with a separate
+ *   AbortController per widget, so their listeners and resize observers are
+ *   released when the widget re-renders or is removed — and re-linking a
+ *   search bar, which rebinds grid search, never resets a carousel.
  *
  * Classic widgets are tracked through Elementor's frontend handler lifecycle;
  * atomic widgets through elementorV2.frontendHandlers. Because an editor
@@ -31,11 +36,16 @@
         return;
     }
 
-    /** @type {Map<Element, {controller: AbortController}>} */
+    /** @type {Map<Element, {controller: AbortController, carousels: AbortController}>} */
     var instances = new Map();
 
     function gridSearchApi() {
         var api = window.mawGridSearch;
+        return api && typeof api.init === "function" ? api : null;
+    }
+
+    function carouselApi() {
+        var api = window.mawCarousel;
         return api && typeof api.init === "function" ? api : null;
     }
 
@@ -46,6 +56,13 @@
         }
     }
 
+    function bindCarousels(root, record) {
+        var api = carouselApi();
+        if (api) {
+            api.init(root, record.carousels.signal);
+        }
+    }
+
     function unmount(root) {
         var record = instances.get(root);
         if (!record) {
@@ -53,6 +70,7 @@
         }
         instances.delete(root);
         record.controller.abort();
+        record.carousels.abort();
     }
 
     // A grid resolves its search bar once, when it is bound. When a search bar
@@ -109,7 +127,7 @@
             }
         });
 
-        var record = { controller: new AbortController() };
+        var record = { controller: new AbortController(), carousels: new AbortController() };
         instances.set(root, record);
 
         if (externalSignal) {
@@ -120,6 +138,7 @@
             }, { once: true });
         }
 
+        bindCarousels(root, record);
         bindGrids(root, record);
         relinkSearchBars(root);
     }

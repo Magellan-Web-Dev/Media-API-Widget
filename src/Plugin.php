@@ -7,6 +7,10 @@ use MediaApiWidget\Frontend\Assets;
 use MediaApiWidget\Frontend\MediaBootstrap;
 use MediaApiWidget\Frontend\Shortcode;
 use MediaApiWidget\Integrations\Elementor\Integration as ElementorIntegration;
+use MediaApiWidget\PostIndex\Backfill;
+use MediaApiWidget\PostIndex\PostIndex;
+use MediaApiWidget\PostIndex\PostIndexAdmin;
+use MediaApiWidget\PostIndex\PostIndexSync;
 use MediaApiWidget\Routing\PodcastPlayerRoute;
 use MediaApiWidget\Seo\MetaUpdater;
 use MediaApiWidget\Stats\ApiCallLogger;
@@ -78,8 +82,13 @@ final class Plugin
      * - {@see Shortcode}         — all four shortcode tags.
      * - {@see MetaUpdater}       — Open Graph / Twitter Card meta tags.
      * - {@see PodcastPlayerRoute} — /podcast/player custom route.
-     * - {@see ElementorIntegration} — optional Elementor widgets (hooks only;
-     *                                inert unless Elementor fires them).
+     * - {@see ElementorIntegration} — optional Elementor widgets and dynamic
+     *                                tags (hooks only; inert unless Elementor
+     *                                fires them).
+     * - {@see PostIndex}, {@see PostIndexSync}, {@see Backfill},
+     *   {@see PostIndexAdmin} — optional per-playlist WordPress post storage
+     *   (the post type is always registered so it can be queried; posts are
+     *   only written for playlists that enable it).
      *
      * @return void
      */
@@ -105,5 +114,11 @@ final class Plugin
 
         // Optional Elementor widgets
         (new ElementorIntegration())->register();
+
+        // Optional per-playlist post storage for builder loops
+        (new PostIndex())->register();
+        (new PostIndexSync())->register();
+        (new Backfill())->register();
+        (new PostIndexAdmin())->register();
     }
 }
