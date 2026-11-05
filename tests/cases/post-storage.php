@@ -783,6 +783,13 @@ return [
         maw_assert_same(1, count(maw_mpi_posts()), 'nothing is deleted');
     },
 
+    'resync and delete return to the Playlist Settings page, not a blank admin-post page' => static function (): void {
+        $url = PostIndexAdmin::settingsUrl();
+
+        maw_assert_same('https://example.test/wp-admin/admin.php?page=maw-media-api&maw_post_index=1', $url, 'the redirect is the Playlist Settings page with the notice flag');
+        maw_assert(!str_contains($url, 'admin-post.php'), 'it never points back at admin-post.php');
+    },
+
     'resync and delete require a nonce for that action and playlist' => static function (): void {
         maw_mpi_register_types();
         maw_mpi_seed_youtube('testshow', maw_ps_items(['vidaaaa1']));

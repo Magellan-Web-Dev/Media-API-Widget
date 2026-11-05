@@ -4,6 +4,7 @@ namespace MediaApiWidget\Admin;
 use MediaApiWidget\Config\Options;
 use MediaApiWidget\PostIndex\PostIndexAdmin;
 use MediaApiWidget\PostIndex\PostIndexSync;
+use MediaApiWidget\Support\PlaylistLimit;
 use MediaApiWidget\Support\PodcastNumbering;
 
 if (!defined('ABSPATH')) { exit; }
@@ -204,7 +205,8 @@ final class SettingsPage
         $sortMode        = $item['sort_mode'] ?? 'normal';
         $seRegexEnabled  = !empty($item['season_episode_regex_enabled']);
         $seRegex         = $item['season_episode_regex'] ?? '';
-        $loadFull        = !empty($item['load_full_playlist']);
+        $loadFull        = PlaylistLimit::fullSelected($item);
+        $playlistLimit   = PlaylistLimit::savedLimit($item);
         $podcastPlatform = $item['podcast_platform'] ?? 'custom';
         $storePosts      = Options::rowStoresPosts($item);
         $podSortMode     = PodcastNumbering::sortMode($item);
@@ -253,11 +255,11 @@ final class SettingsPage
                         <p data-maw-se-regex-wrap="1"<?= $seRegexHidden ?>><label>Season/episode regex<br><input type="text" name="<?= esc_attr($nameBase . '[season_episode_regex]') ?>" data-maw-name="<?= esc_attr($dataBase . '[season_episode_regex]') ?>" value="<?= esc_attr($type === 'youtube' ? $seRegex : '') ?>" placeholder="S(\d+)E(\d+)" /></label>
                         <span class="description">Capture group 1 = season, group 2 = episode. Example: <code>S(\d+)E(\d+)</code> matches "TWCS5E14" as season 5 episode 14. Matched case-insensitively. Items are sorted by season then episode (descending). Titles that don't match fall back to episode-only numbering.</span></p>
                     </div>
-                    <p><label><input type="checkbox" name="<?= esc_attr($nameBase . '[load_full_playlist]') ?>" data-maw-name="<?= esc_attr($dataBase . '[load_full_playlist]') ?>" data-maw-load-full="1" value="1" <?= ($type === 'youtube' && $loadFull) ? 'checked' : '' ?> /> Load full playlist (otherwise first 6)</label></p>
+                    <?php $this->renderLimitFields($nameBase, $dataBase, $type === 'youtube', $loadFull, $playlistLimit, false); ?>
                 </div>
 
                 <div data-maw-fields="podcast"<?= $podStyle ?>>
-                    <p><label>Platform<br><select name="<?= esc_attr($nameBase . '[podcast_platform]') ?>" data-maw-name="<?= esc_attr($dataBase . '[podcast_platform]') ?>">
+                    <p><label>Platform<br><select name="<?= esc_attr($nameBase . '[podcast_platform]') ?>" data-maw-name="<?= esc_attr($dataBase . '[podcast_platform]') ?>" data-maw-podcast-platform="1">
                         <?php foreach (['custom' => 'Direct RSS URL', 'omny' => 'Omny', 'soundcloud' => 'SoundCloud', 'buzzsprout' => 'Buzzsprout', 'other' => 'Other (Apple lookup)', 'embed' => 'Embed URL'] as $v => $label) : ?>
                             <?php $sel = (($type === 'podcast' ? $podcastPlatform : 'custom') === $v) ? 'selected' : ''; ?>
                             <option value="<?= esc_attr($v) ?>" <?= $sel ?>><?= esc_html($label) ?></option>
@@ -277,6 +279,7 @@ final class SettingsPage
                         </select></label>
                         <span class="description">Orders episodes everywhere the plugin lists them (cards, grids, carousels, and stored post positions). Players that pick an episode by its position in the original feed keep the feed's order.</span></p>
                     </div>
+                    <?php $this->renderLimitFields($nameBase, $dataBase, $type === 'podcast', $loadFull, $playlistLimit, $type === 'podcast' && $podcastPlatform === 'embed'); ?>
                 </div>
 
                 <div class="maw-post-storage">
@@ -293,6 +296,37 @@ final class SettingsPage
 
             <td><a href="#" class="button button-link-delete" data-maw-delete="1">Remove</a></td>
         </tr>
+        <?php
+    }
+
+    /**
+     * Outputs the "Load full playlist" checkbox and the "Playlist item limit" field.
+     *
+     * Rendered once in the YouTube fields and once in the podcast fields; only
+     * the group for the row's type is enabled, so one value of each is
+     * submitted. The limit field is hidden, not disabled, while full loading is
+     * checked, so its value is kept for when the box is unchecked. Embed-only
+     * podcasts have no episode list: the controls are hidden and a note says
+     * why, and their values are still kept for a switch back to an RSS platform.
+     *
+     * @param string $nameBase Field name prefix for this row.
+     * @param string $dataBase Field name template used by the admin script.
+     * @param bool   $active   Whether this group belongs to the row's type.
+     * @param bool   $loadFull Saved "Load full playlist" choice.
+     * @param int    $limit    Saved limit.
+     * @param bool   $embed    True for an embed-only podcast.
+     * @return void
+     */
+    private function renderLimitFields(string $nameBase, string $dataBase, bool $active, bool $loadFull, int $limit, bool $embed): void
+    {
+        $disabled = $active ? '' : ' disabled';
+        ?>
+        <div class="maw-playlist-limit" data-maw-limit="1"<?= $embed ? ' style="display:none"' : '' ?>>
+            <p><label><input type="checkbox" name="<?= esc_attr($nameBase . '[load_full_playlist]') ?>" data-maw-name="<?= esc_attr($dataBase . '[load_full_playlist]') ?>" data-maw-load-full="1" value="1" <?= ($active && $loadFull) ? 'checked' : '' ?><?= $disabled ?> /> Load full playlist</label></p>
+            <p data-maw-limit-wrap="1"<?= ($active && $loadFull) ? ' style="display:none"' : '' ?>><label>Playlist item limit<br><input type="number" class="small-text" min="1" step="1" name="<?= esc_attr($nameBase . '[' . PlaylistLimit::KEY . ']') ?>" data-maw-name="<?= esc_attr($dataBase . '[' . PlaylistLimit::KEY . ']') ?>" data-maw-limit-input="1" value="<?= esc_attr((string) $limit) ?>"<?= $disabled ?> /></label><br>
+            <span class="description">Saves only this many items, from the top of the playlist's sorted order (default <?= esc_html((string) PlaylistLimit::DEFAULT) ?>). The whole source is still read; this limits what is saved and shown.</span></p>
+        </div>
+        <p class="description" data-maw-limit-embed-note="1"<?= $embed ? '' : ' style="display:none"' ?>>Embed URL podcasts have no episode list, so "Load full playlist" and the item limit do not apply.</p>
         <?php
     }
 
@@ -344,7 +378,10 @@ final class SettingsPage
      * 'youtube' or 'podcast'. Playlist names are run through sanitize_key();
      * empty names default to 'unnamed' to preserve legacy behavior. All other
      * string fields are sanitized with sanitize_text_field() and trim(). The
-     * load_full_playlist flag is cast to bool.
+     * load_full_playlist flag is cast to bool, and playlist_limit is validated
+     * by {@see PlaylistLimit::sanitize()} (a positive whole number, else 6). It
+     * is written on every row, which is what marks the row as saved by 6.2.0
+     * or later (see {@see PlaylistLimit}).
      *
      * @param mixed $raw The raw $_POST value for 'maw_items'; expected to be an array.
      * @return array<int, array<string,mixed>> Sanitized media item config arrays.
@@ -389,6 +426,8 @@ final class SettingsPage
                     ? substr(preg_replace('/[\x00-\x1F\x7F]/u', '', trim(wp_unslash((string) $item['season_episode_regex']))), 0, 200)
                     : '',
                 'load_full_playlist' => !empty($item['load_full_playlist']),
+                // Kept while full loading is on, for when it is turned off again.
+                PlaylistLimit::KEY => PlaylistLimit::sanitize($item[PlaylistLimit::KEY] ?? null),
                 'podcast_platform' => isset($item['podcast_platform']) ? sanitize_key((string) $item['podcast_platform']) : 'custom',
                 // Podcasts only: order applied when the season/episode regex is on.
                 'podcast_sort_mode' => PodcastNumbering::sortMode(['podcast_sort_mode' => sanitize_key((string) ($item['podcast_sort_mode'] ?? ''))]),

@@ -354,14 +354,17 @@
                         // If Podcast Is Custom, Add Fields In Settings
 
                         if (podcast_platform === "custom") {
-                            settings.podcastplayermode = itemData.podcastplayermode ? itemData.podcastplayermode.slice(1) : "dark";
-                            settings.podcastplayerbuttoncolor = itemData.podcastplayerbuttoncolor ? itemData.podcastplayerbuttoncolor.slice(1) : "";
-                            settings.podcastplayercolor = itemData.podcastplayercolor ? itemData.podcastplayercolor.slice(1) : "";
-                            settings.podcastprogressplayerbarcolor = itemData.podcastprogressplayerbarcolor ? itemData.podcastprogressplayerbarcolor.slice(1) : "";
-                            settings.podcastplayerhighlightcolor = itemData.podcastplayerhighlightcolor ? itemData.podcastplayerhighlightcolor.slice(1) : "";
+                            // Drop a leading "#" only when there is one: "dark", "light"
+                            // and bare hex values must reach the player intact.
+                            const playerColor = value => String(value || "").trim().replace(/^#+/, "");
+                            settings.podcastplayermode = playerColor(itemData.podcastplayermode) || "dark";
+                            settings.podcastplayerbuttoncolor = playerColor(itemData.podcastplayerbuttoncolor);
+                            settings.podcastplayercolor = playerColor(itemData.podcastplayercolor);
+                            settings.podcastprogressplayerbarcolor = playerColor(itemData.podcastprogressplayerbarcolor);
+                            settings.podcastplayerhighlightcolor = playerColor(itemData.podcastplayerhighlightcolor);
                             settings.podcastplayerfont = itemData.podcastplayerfont ? itemData.podcastplayerfont : "";
-                            settings.podcastplayerscrollcolor = itemData.podcastplayerscrollcolor ? itemData.podcastplayerscrollcolor.slice(1) : "";
-                            settings.podcastplayertextcolor = itemData.podcastplayertextcolor ? itemData.podcastplayertextcolor.slice(1) : "";
+                            settings.podcastplayerscrollcolor = playerColor(itemData.podcastplayerscrollcolor);
+                            settings.podcastplayertextcolor = playerColor(itemData.podcastplayertextcolor);
                             settings.showepisodedateaftertitle = itemData.showepisodedateaftertitle ? itemData.showepisodedateaftertitle : "";
                         }
 
@@ -2487,12 +2490,29 @@
 // then dispatch mediaApiWidgetItemClick and open the lightbox / player exactly
 // as they do for cards. Actions: "lightbox" (this item), "playlist" (with the
 // playlist), "event" (dispatch only). The link itself never navigates.
+//
+// Podcast links also get the saved podcast player styling (the values a bare
+// [media-api-podcast-player] uses, exposed by the plugin as
+// window.mawPodcastPlayerStyle), so the custom RSS player opens styled — for
+// every action, so the event's embedUrl is styled too. A styling data
+// attribute the link already carries (e.g. added through Elementor's Custom
+// Attributes) is kept. Other podcast platforms ignore these attributes.
 
 (function () {
     "use strict";
 
     var PREFIX  = "#maw-media-";
     var ACTIONS = { lightbox: true, playlist: true, event: true };
+    var PLAYER_STYLE_KEYS = [
+        "podcastplayermode",
+        "podcastplayertextcolor",
+        "podcastplayerbuttoncolor",
+        "podcastplayercolor",
+        "podcastprogressplayerbarcolor",
+        "podcastplayerhighlightcolor",
+        "podcastplayerfont",
+        "podcastplayerscrollcolor"
+    ];
 
     function decode(payload) {
         try {
@@ -2547,6 +2567,21 @@
         }
     }
 
+    // Fills each podcast player styling attribute the link does not already
+    // carry from the saved styling. A blank saved field leaves the attribute
+    // unset, so the player falls back to its own default.
+    function applyPlayerStyle(anchor) {
+        var saved = window.mawPodcastPlayerStyle;
+        saved = saved && typeof saved === "object" ? saved : {};
+
+        for (var i = 0; i < PLAYER_STYLE_KEYS.length; i++) {
+            var key = PLAYER_STYLE_KEYS[i];
+            if (!anchor.dataset[key]) {
+                setData(anchor, key, typeof saved[key] === "string" ? saved[key] : "");
+            }
+        }
+    }
+
     function hasPlayer(key) {
         var boxes = document.querySelectorAll("[data-lightboxid]");
         for (var i = 0; i < boxes.length; i++) {
@@ -2592,6 +2627,9 @@
         setData(anchor, "lightboxthemecolor", link.color);
         setData(anchor, "lightboxfont", link.font);
         setData(anchor, "lightboxshowlogoimgurl", link.logo);
+        if (audio) {
+            applyPlayerStyle(anchor);
+        }
 
         // A playlist with no player on this page (for example one removed from
         // the settings while its posts were kept) still announces the click.

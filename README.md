@@ -113,7 +113,7 @@ Define the YouTube playlists and podcast feeds the plugin should manage. Each it
 | **Playlist ID** | The YouTube playlist ID (found in the YouTube URL after `list=`). |
 | **API Key** | Your Google/YouTube Data API v3 key. |
 | **Sort Mode** | `Normal` — preserves YouTube order. `Number in title` — extracts the leading number from each video title, deduplicates, and sorts descending. Use this for TV/show episodes numbered in their title. |
-| **Load full playlist** | When checked, fetches all videos in the playlist. When unchecked, limits to the first 6. |
+| **Load full playlist** / **Playlist item limit** | When checked, saves every video. When unchecked, saves only the first *N* videos, set by **Playlist item limit** (default 6). See [Playlist item limit](#playlist-item-limit). |
 | **Store playlist items as WordPress posts** | Off by default. Keeps one post per video for Loop Grids and other builders. See [Stored Playlist Posts](#stored-playlist-posts-loop-grid--page-builders). |
 
 #### Podcast-specific fields
@@ -124,7 +124,28 @@ Define the YouTube playlists and podcast feeds the plugin should manage. Each it
 | **RSS URL / ID / Embed URL** | Depends on the platform selected (see below). |
 | **Season/episode regex** | Off by default. When checked, a pattern numbers each episode from its title: named groups `season` and `episode` are used when present; otherwise two groups are season then episode, and one group is the episode. Matching ignores case. A title the pattern does not match is left unnumbered — numbers are never guessed. |
 | **Sort mode** | Shown with the regex. *Season / episode (newest first)* (default) orders numbered episodes by season, then episode, newest first, with unnumbered episodes after them in feed order. *Feed order* keeps the feed's order and only adds the numbers. This is the order of the plugin's podcast cards and grids, and of stored posts; the `/podcast/player` page reads the feed itself and keeps the feed's order. |
+| **Load full playlist** / **Playlist item limit** | As for YouTube: checked saves every episode, unchecked saves the first *N* (default 6). Not shown for **Embed URL**, which has no episode list. See [Playlist item limit](#playlist-item-limit). |
 | **Store playlist items as WordPress posts** | Off by default. Keeps one post per episode. See [Stored Playlist Posts](#stored-playlist-posts-loop-grid--page-builders). |
+
+#### Playlist item limit
+
+Each YouTube playlist and RSS-backed podcast (Direct RSS URL, Omny, SoundCloud, Buzzsprout, Other) either saves its whole playlist or only its first *N* items:
+
+- **Load full playlist** checked: every item is saved. The limit field is hidden but keeps its value for when the box is unchecked.
+- Unchecked: **Playlist item limit** sets *N*, a whole number of at least 1 (default **6**). A missing or invalid value is saved as 6.
+- New playlists start unchecked, with a limit of 6.
+
+The limit is applied last, after the feed is parsed, numbered, sorted and de-duplicated, so it keeps the top *N* items of the order your cards and grids use. Items are counted, so a duplicate removed from the middle never shortens the list. A playlist with fewer items keeps them all. Podcasts keep all of their channel information (title, description, artwork, feed URL); only the episode list is shortened.
+
+What the limit does **not** change:
+
+- **What is fetched.** YouTube still requests every page of the playlist, under the same [page and daily guards](#runaway-protection); a podcast feed is still read whole. The limit only decides how many items are saved, in the transient, the backup file and the data sent to the browser. It is not a per-grid display limit either: use `multiplegridlimititems` for that.
+- **The `/podcast/player` page.** It reads the RSS feed itself, so its episode list always shows the whole feed. The `[media-api-podcast-player]` shortcode and custom-RSS podcast clicks therefore list every episode even when the playlist saves fewer.
+- **Stored posts.** See [When posts are updated and deleted](#when-posts-are-updated-and-deleted).
+
+**Upgrading from 6.1.x.** YouTube playlists keep their setting: **Load full playlist** stays checked where it was checked, and an unchecked playlist keeps its first 6. Podcasts always loaded in full before 6.2.0, so existing podcasts stay full until you uncheck the box. Older versions saved `load_full_playlist = false` on podcast rows even though podcasts ignored it, so that value alone is not treated as a request to limit. A row is on the new setting once it has a `playlist_limit`, which every save from 6.2.0 writes. Rows in a `MEDIA_CONTENT_DATA` constant follow the same rules; add `'playlist_limit' => 10` (with `'load_full_playlist' => false`) to limit one.
+
+**When a change shows up.** Saving the settings clears each playlist's transient and the YouTube refresh window, so the next page view refetches and saves with the new setting, and the backup file is rewritten. If that refresh fails, the previous backup (with the previous count) is served until a refresh succeeds. Visitors whose browser already holds the playlist in `localStorage` keep it until their media cache cookie expires (the **Media cache transient** time); new visitors, and the admin who saved, get the new data at once. Until a page view refreshes the playlist (one from a visitor without that cookie), server-rendered YouTube cards can still come from the old backup file.
 
 ---
 
@@ -698,6 +719,8 @@ The grid wrapper, search bar, and pagination controls have always carried their 
 
 These apply to both `[media-api-widget-render]` (for the click-to-open player) and `[media-api-podcast-player]` (for the inline iframe player). If left empty, the player reads the corresponding **default shortcode fields** from the admin.
 
+Elements linked with the Elementor [Media API Click Action](#media-api-click-action) tag always open the player with these admin fields (see that section). If an admin field is blank, the player uses its own default for that value (the **Default** column of [the player's query parameters](#podcast-player-podcastplayer)).
+
 | Attribute | Admin Field | Default | Description |
 |---|---|---|---|
 | `podcastplayermode` | `podcast_player_background_color` | `dark` | Background mode/color. `dark`, `light`, or any hex (e.g. `#1a1a2e`). |
@@ -844,6 +867,12 @@ php tests/run-tests.php            # run everything
 php tests/run-tests.php pagination # run one group
 ```
 
+A few front-end behaviors are covered by JavaScript tests in `tests/js/`. They load the real `assets/media-api-widget.js` into a minimal DOM stub and need only Node 18 or later, with no npm packages:
+
+```
+node --test "tests/js/*.test.mjs"
+```
+
 The runner exits non-zero if any assertion fails. Groups live in `tests/cases/`:
 
 | Group | Covers |
@@ -859,6 +888,8 @@ The runner exits non-zero if any assertion fails. Groups live in `tests/cases/`:
 | `backup-inventory` | That the API Stats backup columns resolve the same file the media pipeline writes, report `time_stored` (falling back to the file time), keep YouTube and podcast backups separate, and report nothing for a missing file, an unsupported media type, or an empty slug. |
 | `media-post-index` | The stored-post content model: post type, taxonomies and public meta registration; identity (video ID, podcast GUID with fallbacks, CDATA and attribute-carrying GUIDs) and field mapping; idempotent upserts that never duplicate; transcript and enrichment preservation; deduplicated scheduling; the backfill; and `media_api_widget_rebuild_post_index()`. |
 | `post-storage` | Per-playlist post storage: off by default and isolated per playlist; initial population without removals; in-place updates that keep post IDs, clear vanished values and keep editorial status and enrichment; bounded, deduplicated background batches; removal only after a complete refresh — never after failed, partial or malformed refreshes, the six-item limit, a cache miss, an enrichment write, unidentifiable items, partial write failures, or a newer refresh mid-pass; retries and their limit; lock contention; stopping on disable or removal while keeping posts; capability and per-playlist nonce checks on Resync and Delete; the ID and other builder fields; the Click Action link; podcast season/episode numbering and order; loop ordering and Post Types Order; REST nulls; the read-only edit screen; and the admin menu order and highlighting. |
+| `podcast-player-style` | That the styling exposed to Media API Click Action links (`mawPodcastPlayerStyle`) is exactly what a bare `[media-api-podcast-player]` sends, for seeded, edited, referenced, unresolvable and blank fields; that `dark`/`light`, hex with or without `#` and fonts with spaces reach the player; that empty or non-scalar styling parameters fall back to the player defaults; that nothing is exposed in wp-admin; and that the shortcode's restricted attribute contract and the Elementor widget's scoped overrides are unchanged. `tests/js/click-action-player-style.test.mjs` covers the click itself: the styled URL for each action and width, the episode GUID, autoplay, the event contract, per-link data attributes, editor click suppression, and unchanged YouTube, embed and card behavior. |
+| `playlist-limit` | The playlist item limit: validation (1, 6, 12, invalid values), full mode ignoring the limit, empty and short playlists, sorting and de-duplication before limiting with contiguous keys; YouTube, direct RSS, Apple-resolved RSS and shortcode warm-up paths, channel metadata kept, embed-only podcasts untouched; returned data, transient, backup and browser payload agreeing; independent playlists through `wp_head`; YouTube rows keeping their choice and podcasts saved before 6.2.0 staying full; stored posts kept beyond a lower limit, genuine removals still detected, failed refreshes authorizing nothing; the settings form and sanitizer; and a saved change taking effect on the next refresh while a failed refresh serves the backup. |
 | `extension-api` | That the pre-store filter fires exactly once per complete successful refresh and never for a cache hit, backup read, partial refresh, failed request, unparseable feed, Apple lookup without a successful RSS fetch, or embed-only podcast; that the filtered value is written identically to the transient and backup and is what the current response renders; that a `WP_Error`, wrong shape, or unencodable return leaves the old data byte-for-byte intact; that the shortcode warm-up path cannot bypass the hooks; that the stored action is post-commit; that the global updater changes YouTube and podcast data with no external request while preserving custom item keys and storage formats; and that every lock is released on success, error, and thrown exception. |
 
 ---
@@ -883,23 +914,27 @@ The selected item is resolved using the same `episodenumber`, `nameselect`, and 
 
 The plugin registers the route `/podcast/player` as a standalone HTML page that hosts the full podcast player UI. It is loaded in an `<iframe>` by both the `[media-api-podcast-player]` shortcode and by clicking a podcast thumbnail from `[media-api-widget-render]` when `podcast_platform="custom"`.
 
+The page fetches and reads the RSS feed itself on every load. Its episode list is the whole feed in the feed's order, whatever the playlist's [item limit](#playlist-item-limit) or sort mode.
+
 ### Query Parameters
 
 | Parameter | Description |
 |---|---|
 | `url` | _(required)_ The RSS feed URL. |
 | `track` | 1-based episode number to start on. Defaults to `1` (most recent). |
-| `mode` | Background color. `dark`, `light`, or a hex value (without `#`). |
-| `buttoncolor` | Play button color hex (without `#`). |
-| `color1` | Accent color hex (without `#`). |
-| `progressbarcolor` | Progress bar color hex (without `#`). |
-| `highlightcolor` | Selected episode highlight color hex (without `#`). |
-| `font` | Google Fonts font name (e.g. `Poppins`). |
-| `scrollcolor` | Scrollbar color hex (without `#`). |
-| `textcolor` | Text color hex (without `#`). |
+| `mode` | Background color. `dark` (default), `light`, or a hex value (without `#`). |
+| `buttoncolor` | Play button color hex (without `#`). Default `ffffff`. |
+| `color1` | Accent color hex (without `#`). Default `bbbbbb`. |
+| `progressbarcolor` | Progress bar color hex (without `#`). Default `616161`. |
+| `highlightcolor` | Selected episode highlight color hex (without `#`). Default `888888`. |
+| `font` | Google Fonts font name (e.g. `Poppins`, `Open Sans`). Default `Poppins`. |
+| `scrollcolor` | Scrollbar color hex (without `#`). Default `bbbbbb`. |
+| `textcolor` | Text color hex (without `#`). Default `ffffff`. |
 | `adddatetotitle` | Set to `true` to append the publish date to each episode title. |
 | `singleepisode` | A GUID string. If provided, only that episode is shown (no episode list). |
 | `startepisode` | A GUID string. Starts on that episode and keeps the episode list. Ignored when `singleepisode` is set. |
+
+A styling parameter that is missing **or empty** uses its default, so `color1=` is the same as leaving `color1` out. A hex value is also accepted with a URL-encoded `#` (`%23`).
 
 **Direct URL example:**
 ```
@@ -1395,10 +1430,13 @@ A dynamic tag for any link control — Button, Image, Heading, Icon, a Container
 
 - The link is a `#maw-media-…` fragment, so it never navigates and is ignored by anchor-scrolling scripts.
 - `e.detail.element.dataset.postid` is the stored post's ID.
-- If a video is not in the playlist data on the page — for example beyond the first six items of a playlist that does not load in full — the lightbox plays that video on its own.
+- If a video is not in the playlist data on the page — for example beyond the [item limit](#playlist-item-limit) of a playlist that does not load in full — the lightbox plays that video on its own.
 - Clicking in the Elementor editor selects the element and plays nothing.
 - The playlist must still be configured, because its player is what opens. For a playlist removed from the settings whose posts were kept, the click still dispatches the event, with `showLightbox` `false`.
 - Podcasts open the player of the playlist's platform. `custom` feeds use the [`/podcast/player`](#podcast-player-podcastplayer) page (`singleepisode` / `startepisode`); Omny and Buzzsprout open the clicked episode; SoundCloud opens at its default track, as podcast cards do.
+- `custom` feeds open the player with the saved [podcast player styling](#podcast-player-styling-attributes): the eight `podcast_player_*` admin fields, resolved exactly as a bare `[media-api-podcast-player]` resolves them (`{{field}}` and `[media-api-widget field="…"]` references included). This applies to every action, so the event's `embedUrl` is styled too. The page needs no shortcode or widget for this: every front-end page exposes the resolved values to the plugin script as `window.mawPodcastPlayerStyle`.
+- To change one value for a single link, give the link its own data attribute, for example `data-podcastplayercolor|ff0000` in Elementor's **Link → Custom Attributes**. Any of the eight attributes in [the styling table](#podcast-player-styling-attributes) can be set this way, plus `data-showepisodedateaftertitle|true`.
+- Changes to the admin fields apply on the next page load. A page served from a page cache keeps the styling it was cached with until that cache is cleared.
 
 #### Other builders, `WP_Query` and REST
 
@@ -1437,7 +1475,7 @@ Synchronization is queued whenever the playlist's data is stored — a refresh, 
 | The item is missing from a complete refresh | Yes, once per refresh. |
 | A valid playlist that is now empty | Yes, all of them. |
 | A failed, partial (an error part-way through pagination, the page ceiling, the daily limit) or malformed refresh | No. Nothing is recorded. |
-| **Load full playlist** off (the six-item limit) | No. Every page is still fetched and the refresh lists every item; only the six-item player data is trimmed. Items beyond six are removed only when they leave the playlist. |
+| **Load full playlist** off, or a lower **Playlist item limit** | No. Every page (or the whole feed) is still read and the refresh lists every item; only the saved player data is limited. Posts are created and updated for the saved items; posts that already exist for items beyond the limit are kept as they are and removed only when those items leave the playlist. |
 | An expired cache or missing backup | No. |
 | An enrichment write (`media_api_widget_update_stored_data()`) | No. |
 | An item without a usable identity in the refresh or the stored data | No, for that run. |
@@ -1490,6 +1528,18 @@ Only posts the plugin generated for that playlist can be removed; a post of anot
   - Asset URLs carry `?ver=6.1.1`, so caches pick up the new CSS and JavaScript.
   - The carousel's inline style adds `--maw-carousel-transition-duration`. A searchable carousel's stored settings add `arrowleftsvg`, `arrowrightsvg` and `transition` entries, so its grid key changes once and a fresh search configuration is stored on first view; settings stored by 6.1.0 still render, with the defaults.
   - The Atomic widget uses Elementor's atomic SVG picker (`Svg_Control`) where Elementor provides it, as Elementor 4.x does; on an Elementor version without it, the arrow SVG settings fall back to a text field for the SVG's media-library URL or attachment ID, and the widget registers as before.
+- 6.2.0 gives [Media API Click Action](#media-api-click-action) links to `custom` RSS podcasts the saved podcast player styling. Changes visible to existing installs:
+  - Click Action links to `custom` podcasts now open the player styled with the `podcast_player_*` fields instead of unstyled. The link markup (`#maw-media-…`) and the `mediaApiWidgetItemClick` event details are unchanged; the event's `embedUrl` now carries the styling.
+  - Every front-end page localizes `window.mawPodcastPlayerStyle` next to `mawGridSearchData`.
+  - The `/podcast/player` page treats an empty styling parameter as missing, so it uses the default (for example `color1=` now gives `bbbbbb`, and `font=` gives `Poppins`). Before, an empty color became white and an empty font was left blank. This affects podcast cards that set no `podcastplayer…` attributes, and a `[media-api-podcast-player]` whose `podcast_player_*` field is blank; values that are set render as before.
+  - The legacy client-side `data-playlistname` rendering no longer drops the first character of podcast player colors, so `light` and hex values without `#` now reach the player.
+  - `[media-api-podcast-player]` keeps its attribute contract: it still ignores styling attributes and uses the `podcast_player_*` fields, and the Elementor widget's overrides still apply only to that widget.
+  - Asset URLs carry `?ver=6.2.0`, so caches pick up the new JavaScript.
+- 6.2.0 adds the [playlist item limit](#playlist-item-limit) for YouTube and RSS-backed podcasts:
+  - YouTube playlists keep their setting: a checked **Load full playlist** stays full, and an unchecked one keeps the first 6 items. The old trim counted array positions after de-duplication had removed items, so a playlist with a duplicate title could save fewer than 6; it now saves 6 when it has them.
+  - Existing podcasts stay full until **Load full playlist** is unchecked. New playlists of either type start limited to 6.
+  - Rows saved from 6.2.0 carry a `playlist_limit` key (a whole number, default 6).
+  - **Resync now** and **Delete stored posts** now return to Playlist Settings with their notice. Before, they finished their work and then showed a blank page.
 - [Stored playlist posts](#stored-playlist-posts-loop-grid--page-builders), added in 6.1.0, are opt-in per playlist: until a playlist turns on **Store playlist items as WordPress posts**, no post is created, no synchronization is scheduled, no menu entry appears, and Elementor's Loop Grid does not list the post type. Changes visible to existing installs:
   - The `maw_media_item` post type and the `maw_playlist` and `maw_media_type` taxonomies are registered on every site. They have no front-end URLs, are excluded from search, and stay out of menus until used.
   - The first entry of the **Media API** menu is labelled **Playlist Settings**; it is the same page **Media API** always opened. When posts are stored, **All Media Items** and the per-playlist views are listed in this menu rather than a separate one.

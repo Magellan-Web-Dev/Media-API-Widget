@@ -27,18 +27,21 @@ final class DataParams
      * Reads configuration from the current request URI's query string:
      * - url              — required; the RSS feed to load.
      * - track            — 1-based episode index to start on (default 0 = first).
-     * - mode             — background color: 'dark', 'light', or a hex string.
-     * - color1           — accent color hex.
-     * - progressbarcolor — progress bar hex.
-     * - buttoncolor      — play button icon hex.
-     * - highlightcolor   — selected episode highlight hex.
-     * - scrollcolor      — scrollbar hex.
-     * - textcolor        — text hex.
-     * - font             — Google Fonts font name.
+     * - mode             — background color: 'dark' (default), 'light', or a hex string.
+     * - color1           — accent color hex (default bbbbbb).
+     * - progressbarcolor — progress bar hex (default 616161).
+     * - buttoncolor      — play button icon hex (default ffffff).
+     * - highlightcolor   — selected episode highlight hex (default 888888).
+     * - scrollcolor      — scrollbar hex (default bbbbbb).
+     * - textcolor        — text hex (default ffffff).
+     * - font             — Google Fonts font name (default Poppins).
      * - adddatetotitle   — if present, the publish date is appended to each title.
      * - singleepisode    — GUID string; hides the episode list and jumps to that GUID.
      * - startepisode     — GUID string; starts at that episode and keeps the list.
      * - autoplay         — starts playback when set to a truthy value.
+     *
+     * A styling parameter (mode through font) that is missing, empty or not a
+     * single value uses its default. Hex colors may carry a leading '#'.
      *
      * On error (missing URL, unreachable feed, unparseable XML, or an
      * out-of-range track), error_loading_rss is set to true and err_msg
@@ -78,19 +81,19 @@ final class DataParams
 
         $rssUrl = $params['url'] ?? null;
 
-        // Styling
-        $mode = $params['mode'] ?? 'dark';
-        $mode = $this->normalizeColorMode($mode);
+        // Styling. An empty parameter (a blank stored field, or a link that
+        // sends every key) falls back to the default exactly as a missing one.
+        $font = sanitize_text_field($this->styleParam($params, 'font', 'Poppins'));
 
         $style = [
-            'mode'            => $mode,
-            'color1'          => $this->normalizeHex($params['color1'] ?? 'bbbbbb'),
-            'progressBarColor'=> $this->normalizeHex($params['progressbarcolor'] ?? '616161'),
-            'playButton'      => $this->normalizeHex($params['buttoncolor'] ?? 'ffffff'),
-            'highlight'       => $this->normalizeHex($params['highlightcolor'] ?? '888888'),
-            'scrollbar'       => $this->normalizeHex($params['scrollcolor'] ?? 'bbbbbb'),
-            'textColor'       => $this->normalizeHex($params['textcolor'] ?? 'ffffff'),
-            'font'            => sanitize_text_field((string) ($params['font'] ?? 'Poppins')),
+            'mode'            => $this->normalizeColorMode($this->styleParam($params, 'mode', 'dark')),
+            'color1'          => $this->normalizeHex($this->styleParam($params, 'color1', 'bbbbbb')),
+            'progressBarColor'=> $this->normalizeHex($this->styleParam($params, 'progressbarcolor', '616161')),
+            'playButton'      => $this->normalizeHex($this->styleParam($params, 'buttoncolor', 'ffffff')),
+            'highlight'       => $this->normalizeHex($this->styleParam($params, 'highlightcolor', '888888')),
+            'scrollbar'       => $this->normalizeHex($this->styleParam($params, 'scrollcolor', 'bbbbbb')),
+            'textColor'       => $this->normalizeHex($this->styleParam($params, 'textcolor', 'ffffff')),
+            'font'            => $font !== '' ? $font : 'Poppins',
         ];
 
         $trackSelected = intval($params['track'] ?? 0);
@@ -235,6 +238,24 @@ final class DataParams
             'audio_data'         => $audioData,
             'podcast_image'      => $podcastImage,
         ];
+    }
+
+    /**
+     * Returns a styling query parameter, or its default when missing or blank.
+     *
+     * A non-scalar value (e.g. `mode[]=x`) also yields the default.
+     *
+     * @param array<string,mixed> $params  Parsed query parameters.
+     * @param string              $key     Parameter name.
+     * @param string              $default Default value.
+     * @return string Trimmed value, or `$default`.
+     */
+    private function styleParam(array $params, string $key, string $default): string
+    {
+        $value = $params[$key] ?? null;
+        $value = is_scalar($value) ? trim((string) $value) : '';
+
+        return $value !== '' ? $value : $default;
     }
 
     /**

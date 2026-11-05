@@ -39,7 +39,7 @@ if (!defined('ABSPATH')) { exit; }
  *    that every item was written without failure and every item had a usable
  *    identity; and that this refresh has not already been reconciled. A post is
  *    removed only when its item is in neither the refresh's complete membership
- *    nor the stored data, so a six-item snapshot, an enrichment write, or a
+ *    nor the stored data, so a limited snapshot, an enrichment write, or a
  *    cache read can never shrink the set of posts.
  *
  * A pass with write failures is retried with a delay, up to a limit; a pass that

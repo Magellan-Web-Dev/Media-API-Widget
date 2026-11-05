@@ -5,6 +5,7 @@ use MediaApiWidget\Config\Options;
 use MediaApiWidget\PostIndex\RefreshManifest;
 use MediaApiWidget\Support\BackupFiles;
 use MediaApiWidget\Support\MediaStore;
+use MediaApiWidget\Support\PlaylistLimit;
 use MediaApiWidget\Support\PodcastNumbering;
 use MediaApiWidget\Support\SafeRemoteRequest;
 use MediaApiWidget\Support\XmlText;
@@ -350,6 +351,8 @@ final class MediaContent
             'season_episode_regex' => $params['season_episode_regex'] ?? '',
             'podcast_sort_mode' => $params['podcast_sort_mode'] ?? PodcastNumbering::SORT_SEASON_EPISODE,
             'load_full_playlist' => $params['load_full_playlist'] ?? false,
+            // Null for rows saved before 6.2.0; see PlaylistLimit.
+            PlaylistLimit::KEY => $params[PlaylistLimit::KEY] ?? null,
             'cookie_name' => $params['cookie_name'] ?? null,
             'cookie_expired' => $params['cookie_expired'] ?? true,
             'media_cache_ttl' => $cacheExpirations['media_cache_ttl'],
@@ -418,8 +421,11 @@ final class MediaContent
      * is bounded by `youtube_max_pages_per_refresh` and by the daily circuit
      * breaker. Parsing is delegated to {@see self::parseYoutubeItems()}, which
      * handles title, video ID, thumbnail, episode number (when sort_mode is
-     * 'number_in_title'), publishedDate, and description, deduplicates by title,
-     * and trims to the first six items unless load_full_playlist is set.
+     * 'number_in_title'), publishedDate, and description, and deduplicates by
+     * title. The playlist's saved item limit ({@see PlaylistLimit}) is applied
+     * to that complete result just before it is stored.
+     * "Load full playlist" and the limit only decide how many items are saved:
+     * every page is still fetched, under the same guards.
      *
      * The backup JSON file, the transient cache, the cleared error transient and
      * the `maw_yt_last_fetched_{playlist_name}` timestamp are written only after
@@ -437,7 +443,6 @@ final class MediaContent
         $apiKey                        = $config['api_key'];
         $mediaData                     = $config['media_data'];
         $sortMode                      = $config['sort_mode'];
-        $loadFullPlaylist              = $config['load_full_playlist'];
 
         // Season/episode regex mode is only active when sort_mode is
         // 'number_in_title', the checkbox is enabled, and a non-empty pattern
@@ -517,8 +522,7 @@ final class MediaContent
                 $fetch['items'],
                 $sortMode,
                 $useSeasonEpisode,
-                $seasonEpisodeRegex,
-                $loadFullPlaylist
+                $seasonEpisodeRegex
             );
 
             // A structurally invalid item aborts the whole render, exactly as
@@ -529,17 +533,14 @@ final class MediaContent
             }
 
             // Post storage: every page was fetched, so the complete parsed
-            // playlist — before the six-item limit — is reliable source
+            // playlist — before the item limit — is reliable source
             // membership. It is recorded (only if storage is enabled, and only
             // once the store below succeeds) as the refresh manifest that may
             // authorize removing posts for items that left the playlist.
-            $afterWrite = null;
-            if (Options::isPostStorageEnabled((string) $playlistName, 'youtube')) {
-                $completeItems = $loadFullPlaylist === true
-                    ? $parsedItems
-                    : self::parseYoutubeItems($fetch['items'], $sortMode, $useSeasonEpisode, $seasonEpisodeRegex, true);
-                $afterWrite = RefreshManifest::afterWriteCallback((string) $playlistName, 'youtube', $completeItems);
-            }
+            $afterWrite = RefreshManifest::afterWriteCallback((string) $playlistName, 'youtube', $parsedItems);
+
+            // The saved payload: the first N processed items, or all of them.
+            $limitedItems = PlaylistLimit::applyToList($parsedItems, PlaylistLimit::resolve($config));
 
             // Every requested page completed normally, so this refresh may now
             // replace the stored data. MediaStore fires the pre-store filter,
@@ -547,7 +548,7 @@ final class MediaContent
             // file; a rejection there leaves the previous good data untouched.
             $store = MediaStore::store(
                 MediaStore::buildContext((string) $playlistName, 'youtube', MediaStore::SOURCE_REMOTE_REFRESH),
-                $parsedItems,
+                $limitedItems,
                 ['ttl' => $mediaCacheTtl, 'write_backup' => true, 'after_write' => $afterWrite]
             );
 
@@ -754,17 +755,16 @@ final class MediaContent
      * Extracted verbatim from the previous inline implementation so a healthy
      * playlist produces byte-identical output: the same episode/season parsing,
      * the same thumbnail preference order, the same de-duplication by episode
-     * key and then by adjacent title, the same sort, and the same six-item trim
-     * when load_full_playlist is not set.
+     * key and then by adjacent title, and the same sort.
+     *
+     * It returns the complete processed playlist, reindexed. The item limit is
+     * applied by the caller ({@see PlaylistLimit::applyToList()}), so the
+     * complete list can also serve as the refresh manifest for stored posts.
      *
      * @param array<int,mixed> $rawItems           Merged `items` arrays from every page.
      * @param string           $sortMode           'normal' or 'number_in_title'.
      * @param bool             $useSeasonEpisode   True when season/episode regex mode is active.
      * @param string           $seasonEpisodeRegex The user-supplied pattern, without delimiters.
-     * @param mixed            $loadFullPlaylist   Anything other than boolean true trims
-     *                                             the result to six items. Left untyped so a
-     *                                             legacy MEDIA_CONTENT_DATA value of 1 or '1'
-     *                                             keeps behaving exactly as it did before.
      * @return array<int,array<string,mixed>>|null Parsed items, or null when an item
      *                                             lacked a snippet and the render must abort.
      */
@@ -772,8 +772,7 @@ final class MediaContent
         array $rawItems,
         string $sortMode,
         bool $useSeasonEpisode,
-        string $seasonEpisodeRegex,
-        $loadFullPlaylist
+        string $seasonEpisodeRegex
     ): ?array {
         $parsedData = [];
 
@@ -885,17 +884,8 @@ final class MediaContent
             }
         }
 
-        // If $loadFullPlaylist is not set to true, remove all items after index of 5 from array, limiting list to 6 items
-        $youtubeListOutput = $preDuplicateRemoval;
-
-        if ($loadFullPlaylist !== true) {
-            foreach ($youtubeListOutput as $index => $video) {
-                if ($index > 5) {
-                    unset($youtubeListOutput[$index]);
-                }
-            }
-        }
-        return array_values($youtubeListOutput);
+        // Reindexed, so the gaps left by de-duplication never shorten a limit.
+        return array_values($preDuplicateRemoval);
     }
 
     /**
@@ -1000,11 +990,14 @@ final class MediaContent
                 MediaStore::SOURCE_REMOTE_REFRESH,
                 (string) $podcastPlatform
             ),
-            $normalized,
+            // The saved payload keeps the first N episodes (or all of them) and
+            // every channel field.
+            PlaylistLimit::applyToPodcast($normalized, PlaylistLimit::resolve($config)),
             [
                 'ttl'          => $mediaCacheTtl,
                 'write_backup' => true,
-                // A feed is fetched whole, so it is complete source membership.
+                // A feed is fetched whole, so the unlimited tree is complete
+                // source membership.
                 'after_write'  => RefreshManifest::afterWriteCallback((string) $playlistName, 'podcast', $normalized),
             ]
         );

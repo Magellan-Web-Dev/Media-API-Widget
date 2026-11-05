@@ -2,9 +2,12 @@
 namespace MediaApiWidget\Frontend;
 
 use MediaApiWidget\Config\Options;
+use MediaApiWidget\Config\ShortcodeFields;
+use MediaApiWidget\PodcastPlayer\PlayerStyle;
 use MediaApiWidget\PostIndex\RefreshManifest;
 use MediaApiWidget\Support\InlineSvg;
 use MediaApiWidget\Support\MediaStore;
+use MediaApiWidget\Support\PlaylistLimit;
 use MediaApiWidget\Support\PodcastNumbering;
 use MediaApiWidget\Support\SafeRemoteRequest;
 use MediaApiWidget\Support\XmlText;
@@ -131,7 +134,7 @@ final class Shortcode
             $atts['multiplegridtext'] = $atts['mutiplegridtext'];
         }
 
-        $adminShortcodeValues = $this->getAdminShortcodeValues();
+        $adminShortcodeValues = ShortcodeFields::values();
 
         $defaults = [
             'playlist_name' => '',
@@ -197,7 +200,7 @@ final class Shortcode
 
         $defaults = $this->mergeAdminShortcodeDefaults($defaults, $adminShortcodeValues);
         $atts = shortcode_atts($defaults, $atts, 'media-api-widget-render');
-        $atts = $this->resolveAdminShortcodeAttributeValues($atts, $adminShortcodeValues);
+        $atts = ShortcodeFields::resolveAll($atts, $adminShortcodeValues);
 
         $playlistName = sanitize_key((string) $atts['playlist_name']);
         $mediaType = sanitize_key((string) $atts['media_platform']);
@@ -374,7 +377,7 @@ final class Shortcode
      * Renders the podcast player shortcode as an iframe.
      *
      * Resolves podcast player styling attributes from admin shortcode fields
-     * (via {@see self::applyPodcastPlayerAdminFieldDefaults()}) and resolves
+     * (via {@see PlayerStyle::resolve()}, shared with the Click Action) and resolves
      * the RSS URL from the cached media data or direct config. Builds the
      * `/podcast/player` URL with all styling and episode parameters as query
      * arguments and returns the `<iframe>` tag.
@@ -390,12 +393,9 @@ final class Shortcode
     public function renderPodcastPlayerShortcode($atts = []): string
     {
         $atts = is_array($atts) ? $atts : [];
-        $adminShortcodeValues = $this->getAdminShortcodeValues();
 
         $atts = shortcode_atts($this->getPodcastPlayerShortcodeDefaults(), $atts, 'media-api-podcast-player');
-        $atts = $this->resolveAdminShortcodeAttributeValues($atts, $adminShortcodeValues);
-        $atts = $this->applyPodcastPlayerAdminFieldDefaults($atts, $adminShortcodeValues);
-        $atts = $this->resolveAdminShortcodeAttributeValues($atts, $adminShortcodeValues);
+        $atts = PlayerStyle::resolve($atts, ShortcodeFields::values());
 
         $playlistName = sanitize_key((string) ($atts['playlist_name'] ?? ''));
         $mediaType = sanitize_key((string) ($atts['media_platform'] ?? 'podcast'));
@@ -426,15 +426,7 @@ final class Shortcode
         $queryArgs = [
             'url' => $rssUrl,
             'track' => $track,
-            'mode' => ltrim((string) ($atts['podcastplayermode'] ?? ''), '#'),
-            'buttoncolor' => ltrim((string) ($atts['podcastplayerbuttoncolor'] ?? ''), '#'),
-            'color1' => ltrim((string) ($atts['podcastplayercolor'] ?? ''), '#'),
-            'progressbarcolor' => ltrim((string) ($atts['podcastprogressplayerbarcolor'] ?? ''), '#'),
-            'highlightcolor' => ltrim((string) ($atts['podcastplayerhighlightcolor'] ?? ''), '#'),
-            'font' => (string) ($atts['podcastplayerfont'] ?? ''),
-            'scrollcolor' => ltrim((string) ($atts['podcastplayerscrollcolor'] ?? ''), '#'),
-            'textcolor' => ltrim((string) ($atts['podcastplayertextcolor'] ?? ''), '#'),
-        ];
+        ] + PlayerStyle::queryArgs($atts);
 
         if ($this->isTruthy((string) ($atts['showepisodedateaftertitle'] ?? ''))) {
             $queryArgs['adddatetotitle'] = 'true';
@@ -644,11 +636,12 @@ final class Shortcode
 
         $store = MediaStore::store(
             MediaStore::buildContext($playlistName, 'podcast', MediaStore::SOURCE_SHORTCODE_WARMUP, $platform),
-            $parsed,
+            // The playlist's saved item limit, exactly as the wp_head refresh applies it.
+            PlaylistLimit::applyToPodcast($parsed, PlaylistLimit::resolve($mediaConfig + ['type' => 'podcast'])),
             [
                 'ttl'          => (int) (Options::getCacheExpirations()['media_cache_ttl'] ?? 7200),
                 'write_backup' => true,
-                // A complete feed fetch: its membership may authorize post removal.
+                // A complete feed fetch: its unlimited membership may authorize post removal.
                 'after_write'  => RefreshManifest::afterWriteCallback($playlistName, 'podcast', $parsed),
             ]
         );
@@ -1670,34 +1663,6 @@ final class Shortcode
     }
 
     /**
-     * Returns all stored admin shortcode fields as a flat key-value map.
-     *
-     * Used to populate default attribute values and to resolve `{{field}}`
-     * references. Empty field names are skipped.
-     *
-     * @return array<string,string> Map of field name to value.
-     */
-    private function getAdminShortcodeValues(): array
-    {
-        $values = [];
-
-        foreach (Options::getShortcodes() as $shortcode) {
-            if (!is_array($shortcode)) {
-                continue;
-            }
-
-            $field = sanitize_key((string) ($shortcode['field'] ?? ''));
-            if ($field === '') {
-                continue;
-            }
-
-            $values[$field] = (string) ($shortcode['value'] ?? '');
-        }
-
-        return $values;
-    }
-
-    /**
      * Merges admin shortcode field values into the shortcode defaults array.
      *
      * For each key in `$defaults`, if a matching non-empty admin value exists,
@@ -1721,66 +1686,6 @@ final class Shortcode
     }
 
     /**
-     * Resolves admin shortcode field references in all attribute values.
-     *
-     * Iterates `$atts` and calls {@see self::resolveAdminShortcodeAttributeValue()}
-     * on every string value. Non-string values are passed through unchanged.
-     *
-     * @param array<string,mixed>  $atts        Shortcode attributes.
-     * @param array<string,string> $adminValues Admin shortcode values map.
-     * @return array<string,mixed> Attributes with references resolved.
-     */
-    private function resolveAdminShortcodeAttributeValues(array $atts, array $adminValues): array
-    {
-        foreach ($atts as $key => $value) {
-            if (!is_string($value) || $value === '') {
-                continue;
-            }
-
-            $atts[$key] = $this->resolveAdminShortcodeAttributeValue($value, $adminValues);
-        }
-
-        return $atts;
-    }
-
-    /**
-     * Resolves a single admin shortcode field reference in an attribute value.
-     *
-     * Supports two reference syntaxes:
-     * - `{{field_name}}`                      — resolves to the stored value.
-     * - `[media-api-widget field="field_name"]` — same, in full shortcode notation.
-     *
-     * Returns the original `$value` unchanged when no reference is found or
-     * the referenced field does not exist in `$adminValues`.
-     *
-     * @param string               $value       Raw attribute value to resolve.
-     * @param array<string,string> $adminValues Admin shortcode values map.
-     * @return string Resolved value, or the original if no reference matched.
-     */
-    private function resolveAdminShortcodeAttributeValue(string $value, array $adminValues): string
-    {
-        $trimmed = trim($value);
-
-        if (preg_match('/^\{\{\s*([a-z0-9_-]+)\s*\}\}$/i', $trimmed, $matches) === 1) {
-            $field = sanitize_key((string) ($matches[1] ?? ''));
-            if ($field !== '' && isset($adminValues[$field])) {
-                return $adminValues[$field];
-            }
-            return $value;
-        }
-
-        if (preg_match('/^\[media-api-widget\s+field=(["\'])([a-z0-9_-]+)\1\s*\]$/i', $trimmed, $matches) === 1) {
-            $field = sanitize_key((string) ($matches[2] ?? ''));
-            if ($field !== '' && isset($adminValues[$field])) {
-                return $adminValues[$field];
-            }
-            return $value;
-        }
-
-        return $value;
-    }
-
-    /**
      * Returns the default shortcode attribute map for [media-api-podcast-player].
      *
      * Provides podcast-friendly defaults that differ from the generic render
@@ -1799,54 +1704,6 @@ final class Shortcode
             'showplaybutton' => 'false',
             'lightboxshowplaylist' => 'true',
         ];
-    }
-
-    /**
-     * Applies backend shortcode field values for podcast player styling attributes.
-     *
-     * Maps the eight podcast player shortcode attributes to their corresponding
-     * admin shortcode field names. For each attribute that is either empty or
-     * still contains an unresolved `{{}}` / `[media-api-widget]` placeholder,
-     * substitutes the stored admin value when one is available.
-     *
-     * This runs before the final resolveAdminShortcodeAttributeValues() pass so
-     * that admin field values can themselves contain references.
-     *
-     * @param array<string,mixed>  $atts        Shortcode attributes to fill in.
-     * @param array<string,string> $adminValues Admin shortcode values map.
-     * @return array<string,mixed> Attributes with admin field defaults applied.
-     */
-    private function applyPodcastPlayerAdminFieldDefaults(array $atts, array $adminValues): array
-    {
-        $fieldMap = [
-            'podcastplayermode' => 'podcast_player_background_color',
-            'podcastplayertextcolor' => 'podcast_player_text_color',
-            'podcastplayerbuttoncolor' => 'podcast_player_play_icon_color',
-            'podcastplayercolor' => 'podcast_player_color',
-            'podcastprogressplayerbarcolor' => 'podcast_player_progress_bar_color',
-            'podcastplayerhighlightcolor' => 'podcast_player_selected_color',
-            'podcastplayerfont' => 'podcast_player_font',
-            'podcastplayerscrollcolor' => 'podcast_player_scrollbar_color',
-        ];
-
-        foreach ($fieldMap as $attribute => $fieldName) {
-            $currentValue = isset($atts[$attribute]) ? trim((string) $atts[$attribute]) : '';
-
-            if ($currentValue !== '') {
-                $resolvedValue = $this->resolveAdminShortcodeAttributeValue($currentValue, $adminValues);
-                if ($resolvedValue !== $currentValue) {
-                    $atts[$attribute] = $resolvedValue;
-                    continue;
-                }
-            }
-
-            if (($currentValue === '' || $this->looksLikeAdminShortcodePlaceholder($currentValue))
-                && isset($adminValues[$fieldName]) && $adminValues[$fieldName] !== '') {
-                $atts[$attribute] = $adminValues[$fieldName];
-            }
-        }
-
-        return $atts;
     }
 
     /**
@@ -1882,24 +1739,6 @@ final class Shortcode
         }
 
         return '';
-    }
-
-    /**
-     * Returns true when the value looks like an unresolved admin shortcode reference.
-     *
-     * Used by {@see self::applyPodcastPlayerAdminFieldDefaults()} to detect
-     * placeholder values that should be replaced by the stored admin value even
-     * when the attribute is technically non-empty.
-     *
-     * @param string $value The attribute value to inspect.
-     * @return bool True when the value matches `{{field}}` or `[media-api-widget field=""]`.
-     */
-    private function looksLikeAdminShortcodePlaceholder(string $value): bool
-    {
-        $trimmed = trim($value);
-
-        return preg_match('/^\{\{\s*[a-z0-9_-]+\s*\}\}$/i', $trimmed) === 1
-            || preg_match('/^\[media-api-widget\s+field=(["\'])[a-z0-9_-]+\1\s*\]$/i', $trimmed) === 1;
     }
 
     /**

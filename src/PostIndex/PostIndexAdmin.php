@@ -699,8 +699,23 @@ final class PostIndexAdmin
         }
 
         set_transient('maw_post_index_notice_' . get_current_user_id(), $result, 60);
-        wp_safe_redirect(add_query_arg(self::NOTICE_ARG, '1', menu_page_url(Menu::SLUG, false)));
+        wp_safe_redirect(self::settingsUrl());
         exit;
+    }
+
+    /**
+     * Returns the Playlist Settings URL that shows the last action's notice.
+     *
+     * Built from admin_url() rather than menu_page_url(): the actions run on
+     * admin-post.php, where the admin menu is never registered, so
+     * menu_page_url() returns '' there and the redirect would land back on
+     * admin-post.php as a blank page.
+     *
+     * @return string URL.
+     */
+    public static function settingsUrl(): string
+    {
+        return add_query_arg(self::NOTICE_ARG, '1', admin_url('admin.php?page=' . Menu::SLUG));
     }
 
     /**

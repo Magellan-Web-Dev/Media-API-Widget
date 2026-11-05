@@ -93,7 +93,7 @@ final class AboutPage
                         <tr><td><strong>Playlist ID</strong></td><td>The YouTube playlist ID — the <code>list=</code> value from the playlist URL.</td></tr>
                         <tr><td><strong>API Key</strong></td><td>Your Google/YouTube Data API v3 key from Google Cloud Console.</td></tr>
                         <tr><td><strong>Sort Mode</strong></td><td><em>Normal</em> — preserves YouTube order. <em>Number in title</em> — extracts the leading number from each video title and sorts descending. Ideal for TV episodes numbered in their title.</td></tr>
-                        <tr><td><strong>Load full playlist</strong></td><td>When checked, fetches all videos (paginating past the 50-item API limit). When unchecked, limits to the first 6.</td></tr>
+                        <tr><td><strong>Load full playlist</strong> / <strong>Playlist item limit</strong></td><td>When checked, saves every video. When unchecked, saves only the first <em>N</em>, set by <strong>Playlist item limit</strong> (a whole number of at least 1, default 6). See <a href="#maw-playlist-limit">Playlist item limit</a>.</td></tr>
                         <tr><td><strong>Store playlist items as WordPress posts</strong></td><td>Off by default. Keeps one post per video for Loop Grids and other builders. See <a href="#maw-stored-posts">Stored Playlist Posts</a>.</td></tr>
                     </tbody>
                 </table>
@@ -107,9 +107,18 @@ final class AboutPage
                         <tr><td><strong>RSS URL / ID / Embed URL</strong></td><td>Depends on the platform chosen — RSS URL, Apple numeric ID, or an embed player URL.</td></tr>
                         <tr><td><strong>Season/episode regex</strong></td><td>Off by default. When checked, a pattern numbers each episode from its title: named groups <code>season</code> and <code>episode</code> are used when present; otherwise two groups are season then episode, and one group is the episode. Matching ignores case. A title the pattern does not match is left unnumbered &mdash; numbers are never guessed.</td></tr>
                         <tr><td><strong>Sort mode</strong></td><td>Shown with the regex. <em>Season / episode (newest first)</em> (default) orders numbered episodes by season, then episode, newest first, with unnumbered episodes after them in feed order. <em>Feed order</em> keeps the feed's order and only adds the numbers. This is the order of the plugin's podcast cards and grids and of stored posts; the <code>/podcast/player</code> page reads the feed itself and keeps the feed's order.</td></tr>
+                        <tr><td><strong>Load full playlist</strong> / <strong>Playlist item limit</strong></td><td>As for YouTube: checked saves every episode, unchecked saves the first <em>N</em> (default 6). Not shown for <em>Embed URL</em>, which has no episode list.</td></tr>
                         <tr><td><strong>Store playlist items as WordPress posts</strong></td><td>Off by default. Keeps one post per episode. See <a href="#maw-stored-posts">Stored Playlist Posts</a>.</td></tr>
                     </tbody>
                 </table>
+
+                <h3 id="maw-playlist-limit">Playlist Item Limit</h3>
+                <div class="maw-callout">
+                    <strong>New in 6.2.0.</strong> YouTube playlists keep their setting: a checked <strong>Load full playlist</strong> stays full, and an unchecked one keeps its first 6. Existing podcasts always loaded in full and stay full until you uncheck the box. New playlists start limited to 6.
+                </div>
+                <p>The limit is applied last, after parsing, numbering, sorting and de-duplication, so it keeps the top <em>N</em> items in the order your cards and grids use; a playlist with fewer items keeps them all. Podcasts keep their channel title, description, artwork and feed URL. The limit only decides how many items are <em>saved</em> (the transient, the backup file and the data sent to the browser): YouTube still fetches every page under the same guards, and feeds are still read whole. It is not a per-grid display limit &mdash; use <code>multiplegridlimititems</code> for that.</p>
+                <p>The <code>/podcast/player</code> page reads the feed itself, so its episode list always shows the whole feed. Stored posts are created for the saved items; posts that already exist for items beyond the limit are kept and removed only when those items leave the source.</p>
+                <p>Saving the settings clears each playlist's cache, so the next page view refetches with the new setting. If that refresh fails, the previous backup is served. Browsers that already hold the playlist keep it until their media cache cookie expires.</p>
 
                 <h3>Podcast Platforms</h3>
                 <table class="widefat striped maw-table maw-about-table">
@@ -170,7 +179,7 @@ final class AboutPage
 ]</pre>
 
                 <div class="maw-callout">
-                    <strong>Tip:</strong> When using <code>[media-api-podcast-player]</code>, the default podcast styling fields are applied <em>automatically</em> — you only need to set attribute values if you want to override a specific field for that particular instance.
+                    <strong>Tip:</strong> When using <code>[media-api-podcast-player]</code> or the Elementor <a href="#maw-click-action">Media API Click Action</a> tag, the default podcast styling fields are applied <em>automatically</em>. A blank field uses the player's own default for that value.
                 </div>
             </section>
 
@@ -707,11 +716,12 @@ final class AboutPage
                         <tr><td><strong>Click event only (no lightbox)</strong></td><td colspan="2">Nothing else; <code>showLightbox</code> is <code>false</code>. For your own listener.</td></tr>
                     </tbody>
                 </table>
-                <p>The link is a <code>#maw-media-…</code> fragment that never navigates. <code>e.detail.element.dataset.postid</code> is the post ID. A video missing from the page's playlist data (for example beyond six items) plays on its own. Clicking in the Elementor editor selects the element and plays nothing. The playlist must still be configured for its player to open; otherwise only the event is dispatched. Podcasts open the playlist platform's player: <code>custom</code> feeds use <code>/podcast/player</code>, Omny and Buzzsprout open the clicked episode, and SoundCloud opens at its default track, as podcast cards do.</p>
+                <p>The link is a <code>#maw-media-…</code> fragment that never navigates. <code>e.detail.element.dataset.postid</code> is the post ID. A video missing from the page's playlist data (for example beyond the playlist's item limit) plays on its own. Clicking in the Elementor editor selects the element and plays nothing. The playlist must still be configured for its player to open; otherwise only the event is dispatched. Podcasts open the playlist platform's player: <code>custom</code> feeds use <code>/podcast/player</code>, Omny and Buzzsprout open the clicked episode, and SoundCloud opens at its default track, as podcast cards do.</p>
+                <p><strong>New in 6.2.0.</strong> <code>custom</code> feeds open the player with the saved <a href="#maw-shortcode-fields"><code>podcast_player_*</code> fields</a>, resolved exactly as a bare <code>[media-api-podcast-player]</code> resolves them, for every action. Nothing needs to be added to the page. To change one value for a single link, add a data attribute such as <code>data-podcastplayercolor|ff0000</code> in Elementor's <strong>Link &rarr; Custom Attributes</strong>. Field changes apply on the next page load; a page cache keeps the styling it was cached with until it is cleared.</p>
 
                 <h3>When Posts Are Updated and Deleted</h3>
                 <p>Synchronization is queued whenever the playlist's data is stored (a refresh, a shortcode warm-up, an enrichment write) and runs through the <code>maw_sync_post_index</code> WP-Cron event: one queued event and one run at a time per playlist, 50 items per batch (filter <code>media_api_widget_post_index_batch_size</code>), retries after 5 minutes up to 5 times. Items are matched by YouTube video ID or podcast GUID within their playlist. Changed fields are rewritten in place, values that disappear are cleared, and post IDs never change; post content (transcripts), status, transcript fields and other custom fields are never touched. The <code>media_api_widget_post_index_synced</code> action fires after each run, for purging page caches.</p>
-                <p>A post is deleted &mdash; permanently &mdash; only when a <strong>complete, validated refresh</strong> (every page fetched, or the whole feed parsed, and stored) no longer contains its item, once per refresh. A valid empty playlist removes every post. Nothing is removed after a failed, partial or malformed refresh, because of the six-item limit (every page is still fetched and recorded), after an expired cache, after an enrichment write, while an item has no usable identity, after a failed save, while a newer refresh is arriving, or on the first run after storage is turned on. Only posts the plugin generated for that playlist are ever removed.</p>
+                <p>A post is deleted &mdash; permanently &mdash; only when a <strong>complete, validated refresh</strong> (every page fetched, or the whole feed parsed, and stored) no longer contains its item, once per refresh. A valid empty playlist removes every post. Nothing is removed after a failed, partial or malformed refresh, because of the playlist item limit (every page is still fetched and recorded), after an expired cache, after an enrichment write, while an item has no usable identity, after a failed save, while a newer refresh is arriving, or on the first run after storage is turned on. Only posts the plugin generated for that playlist are ever removed.</p>
 
                 <h3>Turning It Off and Retention</h3>
                 <ul>
@@ -745,7 +755,7 @@ final class AboutPage
                 </div>
 
                 <h3>Player URL Query Parameters</h3>
-                <p>You can link directly to the player or build iframes manually using these parameters:</p>
+                <p>You can link directly to the player or build iframes manually using these parameters. A styling parameter that is missing <em>or empty</em> uses its default.</p>
                 <table class="widefat striped maw-table maw-about-table">
                     <thead><tr><th style="width:200px;">Parameter</th><th style="width:140px;">Default</th><th>Description</th></tr></thead>
                     <tbody>

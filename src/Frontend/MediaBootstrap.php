@@ -2,6 +2,7 @@
 namespace MediaApiWidget\Frontend;
 
 use MediaApiWidget\Config\Options;
+use MediaApiWidget\Support\PlaylistLimit;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -119,6 +120,7 @@ final class MediaBootstrap
                 'season_episode_regex' => $item['season_episode_regex'] ?? '',
                 'podcast_sort_mode' => $item['podcast_sort_mode'] ?? 'season_episode',
                 'load_full_playlist' => $item['load_full_playlist'] ?? false,
+                PlaylistLimit::KEY => $item[PlaylistLimit::KEY] ?? null,
                 'cookie_name'      => $cookieName,
                 'cookie_expired'   => $cookieExpired,
             ]);

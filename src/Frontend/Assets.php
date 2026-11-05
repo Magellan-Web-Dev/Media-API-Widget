@@ -1,6 +1,8 @@
 <?php
 namespace MediaApiWidget\Frontend;
 
+use MediaApiWidget\PodcastPlayer\PlayerStyle;
+
 if (!defined('ABSPATH')) { exit; }
 
 /**
@@ -32,6 +34,11 @@ final class Assets
      * front-end assets inside wp-admin. The script is loaded in the
      * footer (last argument true) so it does not block page rendering.
      *
+     * Also exposes `mawPodcastPlayerStyle`: the saved podcast player styling
+     * ({@see PlayerStyle::savedDefaults()}), which "Media API Click Action"
+     * links give the custom podcast player. It is resolved on every page
+     * because such a link needs no shortcode or widget on the page.
+     *
      * @return void
      */
     public function enqueue(): void
@@ -47,5 +54,6 @@ final class Assets
             'ajaxUrl' => admin_url('admin-ajax.php'),
             'nonce'   => wp_create_nonce('maw_grid_search'),
         ]);
+        wp_localize_script('maw-media-api-widget', 'mawPodcastPlayerStyle', PlayerStyle::savedDefaults());
     }
 }

@@ -41,7 +41,7 @@
     var warning = row.querySelector('[data-maw-posts-warning]');
     if(!warning) return;
     var typeSel = row.querySelector('[data-maw-type-select]');
-    var loadFull = row.querySelector('[data-maw-load-full]');
+    var loadFull = row.querySelector('[data-maw-fields="youtube"] [data-maw-load-full]');
     var store = row.querySelector('[data-maw-store-posts]');
     var show = !!(typeSel && typeSel.value === 'youtube' && loadFull && loadFull.checked && !loadFull.disabled && store && store.checked);
     warning.style.display = show ? '' : 'none';
@@ -53,6 +53,32 @@
     if(!box) return;
     var wrap = box.querySelector('[data-maw-pod-se-wrap]');
     if(wrap) wrap.style.display = toggle.checked ? '' : 'none';
+  }
+
+  // "Load full playlist" / "Playlist item limit", in both the YouTube and the
+  // podcast fields. The limit shows only while full loading is off, and both
+  // hide for an embed-only podcast, which has no episode list. Hidden fields
+  // stay enabled so their values are kept; a hidden limit that is not a valid
+  // whole number is reset to 6 (the server's fallback too), so a field the
+  // user cannot see never blocks the form from saving.
+  function syncLimit(row){
+    if(!row) return;
+    var platformSel = row.querySelector('[data-maw-podcast-platform]');
+    row.querySelectorAll('[data-maw-limit]').forEach(function(block){
+      var box = block.closest('[data-maw-fields]');
+      var embed = !!(box && box.dataset.mawFields === 'podcast' && platformSel && platformSel.value === 'embed');
+      block.style.display = embed ? 'none' : '';
+      var note = box ? box.querySelector('[data-maw-limit-embed-note]') : null;
+      if(note) note.style.display = embed ? '' : 'none';
+      var full = block.querySelector('[data-maw-load-full]');
+      var wrap = block.querySelector('[data-maw-limit-wrap]');
+      var input = block.querySelector('[data-maw-limit-input]');
+      var hidden = embed || !!(full && full.checked);
+      if(wrap) wrap.style.display = (full && full.checked) ? 'none' : '';
+      if(hidden && input && typeof input.checkValidity === 'function' && !input.checkValidity()){
+        input.value = '6';
+      }
+    });
   }
 
   function addRow(type){
@@ -72,6 +98,7 @@
       if(sortSel) syncSeasonEpisodeForRow(sortSel);
       var podToggle = newRow.querySelector('[data-maw-pod-se-toggle]');
       if(podToggle) syncPodcastSeasonEpisode(podToggle);
+      syncLimit(newRow);
       syncPostsWarning(newRow);
     }
   }
@@ -152,6 +179,9 @@
     if(podToggle){
       syncPodcastSeasonEpisode(podToggle);
     }
+    if(e.target.closest('[data-maw-type-select], [data-maw-load-full], [data-maw-podcast-platform]')){
+      syncLimit(e.target.closest('[data-maw-row]'));
+    }
     if(e.target.closest('[data-maw-type-select], [data-maw-load-full], [data-maw-store-posts]')){
       syncPostsWarning(e.target.closest('[data-maw-row]'));
     }
@@ -169,5 +199,6 @@
   qsa('[data-maw-pod-se-toggle]').forEach(function(toggle){
     syncPodcastSeasonEpisode(toggle);
   });
+  qsa('[data-maw-row]').forEach(syncLimit);
   qsa('[data-maw-row]').forEach(syncPostsWarning);
 })();

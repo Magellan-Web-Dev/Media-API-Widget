@@ -11,15 +11,15 @@ if (!defined('ABSPATH')) { exit; }
  *
  * Deleting a stored post because its item "is missing" is only safe when the
  * plugin knows what the complete source contained. The cached payload cannot
- * tell it that: it may be a six-item snapshot, an enrichment write, a backup
+ * tell it that: it may be a limited snapshot, an enrichment write, a backup
  * read after a failed fetch, or simply older than the posts. So absence-based
  * deletion is authorized by this manifest alone, and only a completed,
  * validated, successfully stored remote refresh writes one.
  *
  * A manifest holds the source identity (the same composite key the posts carry)
- * of every item in the *complete* refresh result — for a YouTube playlist with
- * "Load full playlist" off, that is the whole fetched playlist, not the six
- * items that were stored — plus whether that membership is certain. Membership
+ * of every item in the *complete* refresh result — for a playlist with
+ * "Load full playlist" off, that is the whole fetched playlist or feed, not
+ * the limited items that were stored — plus whether that membership is certain. Membership
  * is uncertain, and the manifest is marked incomplete, when any item in the
  * result had no usable identity.
  *
