@@ -1156,3 +1156,84 @@ if (!function_exists('get_current_screen')) {
         return $GLOBALS['maw_test_screen'] ?? null;
     }
 }
+
+// ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
+/**
+ * Adds a media-library attachment backed by a real file.
+ *
+ * @param string $file     Absolute path of the file.
+ * @param string $mimeType Attachment MIME type.
+ * @param string $url      Attachment URL.
+ * @return int Attachment ID.
+ */
+function maw_test_add_attachment(string $file, string $mimeType, string $url): int
+{
+    $id = MawTestPosts::$nextPostId++;
+
+    MawTestPosts::$posts[$id] = [
+        'ID'             => $id,
+        'post_type'      => 'attachment',
+        'post_status'    => 'inherit',
+        'post_title'     => basename($file),
+        'post_content'   => '',
+        'post_excerpt'   => '',
+        'post_name'      => sanitize_title(basename($file)),
+        'post_author'    => MawTestPosts::$currentUserId,
+        'menu_order'     => 0,
+        'post_date_gmt'  => gmdate('Y-m-d H:i:s', maw_test_time()),
+        'comment_status' => 'closed',
+        'ping_status'    => 'closed',
+        'post_mime_type' => $mimeType,
+        'guid'           => $url,
+        'file'           => $file,
+    ];
+
+    return $id;
+}
+
+if (!function_exists('get_post_mime_type')) {
+    /**
+     * @param int|object|null $post Post ID or object.
+     * @return string|false MIME type, or false when there is none.
+     */
+    function get_post_mime_type($post = null)
+    {
+        $id = is_object($post) ? (int) ($post->ID ?? 0) : (int) $post;
+
+        return MawTestPosts::$posts[$id]['post_mime_type'] ?? false;
+    }
+}
+
+if (!function_exists('get_attached_file')) {
+    /**
+     * @param int  $attachmentId Attachment ID.
+     * @param bool $unfiltered   Unused.
+     * @return string|false File path, or false.
+     */
+    function get_attached_file($attachmentId, $unfiltered = false)
+    {
+        $file = MawTestPosts::$posts[(int) $attachmentId]['file'] ?? '';
+
+        return $file !== '' ? $file : false;
+    }
+}
+
+if (!function_exists('attachment_url_to_postid')) {
+    /**
+     * @param string $url Attachment URL.
+     * @return int Attachment ID, or 0.
+     */
+    function attachment_url_to_postid($url)
+    {
+        foreach (MawTestPosts::$posts as $id => $row) {
+            if (($row['post_type'] ?? '') === 'attachment' && ($row['guid'] ?? '') === (string) $url) {
+                return (int) $id;
+            }
+        }
+
+        return 0;
+    }
+}

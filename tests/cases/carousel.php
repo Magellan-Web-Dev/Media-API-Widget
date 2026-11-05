@@ -21,6 +21,7 @@ use MediaApiWidget\Integrations\Elementor\SettingsAdapter;
 use MediaApiWidget\Integrations\Elementor\ShortcodeText;
 use MediaApiWidget\Integrations\Elementor\WidgetRenderer;
 use MediaApiWidget\Integrations\Elementor\WidgetSchema;
+use MediaApiWidget\Support\InlineSvg;
 
 /**
  * Builds stored YouTube items, newest first.
@@ -182,6 +183,37 @@ function maw_car_flags(string $mode): array
     ];
 }
 
+/**
+ * Writes an SVG (or other) file and registers it as a media-library attachment.
+ *
+ * @param string $name     File name, unique per fixture.
+ * @param string $contents File contents.
+ * @param string $mime     Attachment MIME type.
+ * @return int Attachment ID.
+ */
+function maw_car_svg(string $name, string $contents, string $mime = 'image/svg+xml'): int
+{
+    $dir = sys_get_temp_dir() . '/maw-tests-svg';
+    if (!is_dir($dir)) {
+        mkdir($dir, 0777, true);
+    }
+    file_put_contents($dir . '/' . $name, $contents);
+
+    return maw_test_add_attachment($dir . '/' . $name, $mime, 'https://example.test/wp-content/uploads/' . $name);
+}
+
+/**
+ * Returns the markup inside one carousel arrow button.
+ *
+ * @param string $html Carousel HTML.
+ * @param string $side 'left' or 'right'.
+ * @return string Icon markup.
+ */
+function maw_car_arrow_icon(string $html, string $side): string
+{
+    return preg_match('/data-maw-carousel-arrow="' . $side . '"[^>]*>(.*?)<\/button>/s', $html, $m) === 1 ? $m[1] : '';
+}
+
 return [
 
     // -- Grid stays the default ---------------------------------------------
@@ -247,9 +279,9 @@ return [
 
         maw_assert(str_starts_with($html, '<div class="maw-carousel media-carousel" data-maw-carousel="" data-maw-carousel-step="item"'), 'the wrapper carries the hook, styling class and step');
         maw_assert_same(
-            '--maw-carousel-gap: 48px; --maw-carousel-min: 400px; --maw-carousel-arrow-size: 48px; --maw-carousel-arrow-icon-size: 24px; --maw-carousel-arrow-offset: 12px; --maw-carousel-arrow-color: #ffffff; --maw-carousel-arrow-background: rgba(0, 0, 0, 0.6);',
+            '--maw-carousel-gap: 48px; --maw-carousel-min: 400px; --maw-carousel-arrow-size: 48px; --maw-carousel-arrow-icon-size: 24px; --maw-carousel-arrow-offset: 12px; --maw-carousel-arrow-color: #ffffff; --maw-carousel-arrow-background: rgba(0, 0, 0, 0.6); --maw-carousel-transition-duration: 0.25s;',
             maw_car_style($html),
-            'every sizing and arrow default is applied'
+            'every sizing, arrow and transition default is applied'
         );
         maw_assert(str_contains($html, '<button type="button" class="maw-carousel-arrow maw-carousel-arrow-left media-carousel-arrow" data-maw-carousel-arrow="left" aria-label="Previous item" hidden>'), 'the left arrow is a hidden, labelled button until the script needs it');
         maw_assert(str_contains($html, 'data-maw-carousel-arrow="right" aria-label="Next item" hidden>'), 'the right arrow is labelled');
@@ -297,6 +329,57 @@ return [
         $colors = $style(['carouselarrowcolor' => 'red;x:y', 'carouselarrowbackground' => 'url(x)']);
         maw_assert(str_contains($colors, '--maw-carousel-arrow-color: #ffffff;'), 'an invalid color uses the default');
         maw_assert(str_contains($colors, '--maw-carousel-arrow-background: rgba(0, 0, 0, 0.6);'), 'a non-color uses the default');
+    },
+
+    'the transition duration accepts times, CSS variables and math functions' => static function (): void {
+        maw_car_setup();
+
+        $duration = static function (string $value): string {
+            $style = maw_car_style(maw_car_render(['multiplegrid' => 'true', 'multiplegridlayout' => 'carousel', 'multiplegridlimititems' => '3', 'carouseltransitionduration' => $value]));
+            return preg_match('/--maw-carousel-transition-duration: (.*);$/', $style, $m) === 1 ? $m[1] : '(missing)';
+        };
+
+        $kept = [
+            '0.5s'                                    => 'seconds are kept',
+            '400ms'                                   => 'milliseconds are kept',
+            '.3s'                                     => 'a leading-dot number is kept',
+            '0s'                                      => 'zero (an instant move) is usable',
+            'var(--slide-speed)'                      => 'a CSS variable is kept',
+            'var(--e-global_Speed-1)'                 => 'a variable name keeps its case, digits and underscores',
+            'var(--slide-speed, 300ms)'               => 'a variable with a fallback is kept',
+            'calc(var(--slide-speed) * 2)'            => 'calc() around a variable is kept',
+            'calc(0.2s + 100ms)'                      => 'calc() arithmetic is kept',
+            'clamp(150ms, var(--slide-speed), 1s)'    => 'clamp() is kept',
+            'min(var(--a, 1s), max(200ms, var(--b)))' => 'nested functions are kept',
+        ];
+        foreach ($kept as $value => $label) {
+            maw_assert_same($value, $duration($value), $label);
+        }
+
+        maw_assert_same('250ms', $duration('250'), 'a bare number is read as milliseconds');
+        maw_assert_same('0ms', $duration('0'), 'a bare zero is an instant move');
+        maw_assert_same('0.5s', $duration(' 0.5S '), 'units are lowercased and whitespace trimmed');
+
+        $rejected = [
+            ''                                   => 'an empty value',
+            '-1s'                                => 'a negative time',
+            'fast'                               => 'a keyword',
+            '10px'                               => 'a length',
+            '1s; background: red'                => 'a declaration break-out',
+            'var(--x); color: red'               => 'a break-out after a variable',
+            'var(--x, url(https://evil.test))'   => 'a url() fallback',
+            'calc(1s + expression(alert(1)))'    => 'an unknown function',
+            'var(--x))('                         => 'unbalanced parentheses',
+            'calc((1s)'                          => 'an unclosed parenthesis',
+            'attr(data-speed)'                   => 'a function outside the allowlist',
+            str_repeat('1', 121)                 => 'an over-long value',
+        ];
+        foreach ($rejected as $value => $label) {
+            maw_assert_same('0.25s', $duration((string) $value), $label . ' uses the default');
+        }
+
+        $html = maw_car_render(['multiplegrid' => 'true', 'multiplegridlayout' => 'carousel', 'carouseltransitionduration' => 'var(--a, 1s)']);
+        maw_assert(str_contains($html, 'style="--maw-carousel-gap: 48px;') && str_contains($html, '--maw-carousel-transition-duration: var(--a, 1s);"'), 'the duration is the last inline variable, attribute-escaped');
     },
 
     'arrow step and labels follow carouselstep' => static function (): void {
@@ -430,8 +513,8 @@ return [
             'the stored configuration adds only the carousel entry'
         );
         maw_assert_same([
-            'layout' => 'carousel', 'gap' => '48px', 'minsize' => '18rem', 'step' => 'group', 'arrowleft' => '', 'arrowright' => '',
-            'arrowsize' => '48px', 'arrowiconsize' => '24px', 'arrowcolor' => '#00ff00', 'arrowbackground' => 'rgba(0, 0, 0, 0.6)', 'arrowoffset' => '12px',
+            'layout' => 'carousel', 'gap' => '48px', 'minsize' => '18rem', 'step' => 'group', 'arrowleft' => '', 'arrowright' => '', 'arrowleftsvg' => '', 'arrowrightsvg' => '',
+            'arrowsize' => '48px', 'arrowiconsize' => '24px', 'arrowcolor' => '#00ff00', 'arrowbackground' => 'rgba(0, 0, 0, 0.6)', 'arrowoffset' => '12px', 'transition' => '0.25s',
         ], $config['carousel'] ?? null, 'the stored carousel configuration is the validated one');
 
         maw_assert_same($key, maw_car_attr(maw_car_render($atts), 'data-maw-grid-key'), 'the key is stable for the same settings');
@@ -440,7 +523,7 @@ return [
         maw_assert(maw_car_attr($grid, 'data-maw-grid-key') !== $key, 'a grid with the same settings has its own key');
         maw_assert(!isset(get_transient('maw_grid_' . maw_car_attr($grid, 'data-maw-grid-key'))['carousel']), 'the grid stores no carousel entry');
 
-        foreach (['carouselarrowcolor' => '#0000ff', 'carouselstep' => 'item', 'carouselarrowrightimgurl' => 'https://example.test/r.svg', 'carouselarrowoffset' => '4px'] as $attr => $value) {
+        foreach (['carouselarrowcolor' => '#0000ff', 'carouselstep' => 'item', 'carouselarrowrightimgurl' => 'https://example.test/r.svg', 'carouselarrowoffset' => '4px', 'carouseltransitionduration' => '0.5s'] as $attr => $value) {
             maw_assert(maw_car_attr(maw_car_render([$attr => $value] + $atts), 'data-maw-grid-key') !== $key, 'changing ' . $attr . ' changes the key');
         }
     },
@@ -481,12 +564,24 @@ return [
         $key  = maw_car_attr($html, 'data-maw-grid-key');
 
         $config = get_transient('maw_grid_' . $key);
-        $config['carousel'] = ['gap' => '1px;}body{display:none', 'minsize' => 'x', 'step' => 'group', 'arrowcolor' => 'expression(alert(1))'];
+        $config['carousel'] = ['gap' => '1px;}body{display:none', 'minsize' => 'x', 'step' => 'group', 'arrowcolor' => 'expression(alert(1))', 'transition' => '1s;}body{display:none'];
         set_transient('maw_grid_' . $key, $config, 86400);
 
         $style = maw_car_style((string) (maw_car_ajax($key)['html'] ?? ''));
         maw_assert(str_contains($style, '--maw-carousel-gap: 48px;') && str_contains($style, '--maw-carousel-min: 400px;'), 'invalid stored lengths fall back to defaults');
         maw_assert(str_contains($style, '--maw-carousel-arrow-color: #ffffff;'), 'an invalid stored color falls back to the default');
+        maw_assert(str_contains($style, '--maw-carousel-transition-duration: 0.25s;'), 'an invalid stored duration falls back to the default');
+
+        // Configurations stored before the duration setting existed have no
+        // 'transition' entry and render with the default.
+        $config['carousel'] = ['step' => 'group', 'arrowcolor' => '#00ff00'];
+        set_transient('maw_grid_' . $key, $config, 86400);
+        $style = maw_car_style((string) (maw_car_ajax($key)['html'] ?? ''));
+        maw_assert(str_contains($style, '--maw-carousel-transition-duration: 0.25s;') && str_contains($style, '--maw-carousel-arrow-color: #00ff00;'), 'a configuration stored without a duration uses the default');
+
+        $config['carousel'] = ['transition' => 'var(--slide-speed, 600ms)'];
+        set_transient('maw_grid_' . $key, $config, 86400);
+        maw_assert(str_contains(maw_car_style((string) (maw_car_ajax($key)['html'] ?? '')), '--maw-carousel-transition-duration: var(--slide-speed, 600ms);'), 'a stored CSS-variable duration is kept on AJAX pages');
 
         unset($config['carousel']);
         set_transient('maw_grid_' . $key, $config, 86400);
@@ -507,15 +602,18 @@ return [
             'carouselarrowleftimgurl' => 'value', 'carouselarrowleftimgurl_value' => ['url' => 'https://example.test/l.svg', 'id' => 9],
             'carouselarrowcolor' => 'value', 'carouselarrowcolor_value' => '#FF0000',
             'carouselarrowsize' => 'value', 'carouselarrowsize_value' => '3rem',
+            'carouseltransitionduration' => 'value', 'carouseltransitionduration_value' => 'var(--slide-speed, 400ms)',
         ];
         $atomic = array_merge($classic, ['carouselarrowleftimgurl_value' => 'https://example.test/l.svg', 'multiplegridlimititems_value' => 5, 'carouselarrowoffset' => null, 'carouselarrowoffset_value' => null]);
 
         $shortcode = maw_car_render([
             'multiplegridlayout' => 'carousel', 'carouselstep' => 'group', 'multiplegridminsize' => '300px', 'multiplegridgap' => '24px',
             'multiplegridlimititems' => '5', 'carouselarrowleftimgurl' => 'https://example.test/l.svg', 'carouselarrowcolor' => '#FF0000', 'carouselarrowsize' => '3rem',
+            'carouseltransitionduration' => 'var(--slide-speed, 400ms)',
         ] + maw_car_flags('grid'));
 
         maw_assert(str_contains($shortcode, 'data-maw-carousel=""'), 'the shortcode renders a carousel');
+        maw_assert(str_contains(maw_car_style($shortcode), '--maw-carousel-transition-duration: var(--slide-speed, 400ms);'), 'the widget duration reaches the carousel');
         maw_assert_same($shortcode, WidgetRenderer::render($classic, 'abc1234', false), 'the classic widget is byte-identical to the shortcode');
         maw_assert_same($shortcode, WidgetRenderer::render($atomic, 'abc1234', false), 'the atomic widget is byte-identical to the shortcode');
     },
@@ -553,6 +651,7 @@ return [
             'media_platform' => 'youtube', 'youtube_playlist' => 'show',
             'multiplegridlayout' => 'carousel', 'carouselstep' => 'group', 'carouselarrowcolor' => 'value', 'carouselarrowcolor_value' => '#ff0000',
             'carouselarrowrightimgurl' => 'value', 'carouselarrowrightimgurl_value' => 'https://example.test/r.svg',
+            'carouseltransitionduration' => 'value', 'carouseltransitionduration_value' => '0.6s',
         ];
         $atts = static function (array $settings): array {
             $calls = SettingsAdapter::plan($settings, 'abc1234')['calls'];
@@ -566,7 +665,7 @@ return [
 
         foreach (['inherit', 'grid'] as $layout) {
             $grid = $atts(['output_mode' => 'grid', 'multiplegridlayout' => $layout] + $carouselSettings);
-            foreach (['carouselstep', 'carouselarrowcolor', 'carouselarrowrightimgurl'] as $attr) {
+            foreach (['carouselstep', 'carouselarrowcolor', 'carouselarrowrightimgurl', 'carouseltransitionduration'] as $attr) {
                 maw_assert(!array_key_exists($attr, $grid), $attr . ' is ignored while the layout is ' . $layout);
             }
         }
@@ -605,6 +704,9 @@ return [
         maw_assert_same('image', $specs['carouselarrowleftimgurl']['kind'], 'arrow images use the media control (classic) / URL control (atomic)');
         maw_assert_same(Shortcode::CAROUSEL_DEFAULTS['carouselarrowsize'], $specs['carouselarrowsize']['placeholder'], 'the size placeholder shows the default');
         maw_assert_same(Shortcode::CAROUSEL_DEFAULTS['carouselarrowoffset'], $specs['carouselarrowoffset']['placeholder'], 'the offset placeholder shows the default');
+        maw_assert_same(Shortcode::CAROUSEL_DEFAULTS['carouseltransitionduration'], $specs['carouseltransitionduration']['placeholder'], 'the duration placeholder shows the default');
+        maw_assert_same('Default (0.25s)', WidgetSchema::sourceOptions($specs['carouseltransitionduration'])['inherit'], 'the duration source names its default');
+        maw_assert_same('text', $specs['carouseltransitionduration']['kind'], 'the duration is free text, so CSS variables can be entered');
         maw_assert_same(false, $specs['multiplegridlayout']['empty'], 'the layout offers no empty value');
     },
 
@@ -621,5 +723,160 @@ return [
             $text,
             'the saved shortcode renders the same carousel without Elementor'
         );
+    },
+    // -- Arrow SVGs ---------------------------------------------------------
+
+    'arrow SVGs are rebuilt from an allowlist before they are inlined' => static function (): void {
+        $clean = InlineSvg::sanitize('<?xml version="1.0"?><!-- made by hand --><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><title>Next &amp; more</title><path d="M9 5l7 7-7 7"/></svg>', 'icon');
+        maw_assert_same(
+            '<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="currentColor"><title>Next &amp; more</title><path d="M9 5l7 7-7 7"></path></svg>',
+            $clean,
+            'a plain icon keeps its drawing, is decorative, and takes the text color'
+        );
+
+        $stroke = InlineSvg::sanitize('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>');
+        maw_assert(str_contains($stroke, 'fill="none" stroke="currentColor" stroke-width="2"') && substr_count($stroke, 'fill=') === 1, 'a stroke icon keeps fill="none" (it is not filled in)');
+
+        $colored = InlineSvg::sanitize('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" fill="#ff0000"><rect width="10" height="10"/></svg>');
+        maw_assert(str_contains($colored, 'fill="#ff0000"') && !str_contains($colored, 'currentColor'), 'an SVG that sets its own fill keeps it');
+
+        $sized = InlineSvg::sanitize('<svg xmlns="http://www.w3.org/2000/svg" width="32px" height="16"><rect width="32" height="16"/></svg>');
+        maw_assert(str_contains($sized, 'viewBox="0 0 32 16"'), 'a viewBox is derived from width and height so the icon scales');
+
+        $gradient = InlineSvg::sanitize('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><defs><linearGradient id="g" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#000"/></linearGradient></defs><rect fill="url(#g)" width="2" height="2"/></svg>');
+        maw_assert(str_contains($gradient, '<linearGradient id="g" gradientUnits="userSpaceOnUse">') && str_contains($gradient, 'fill="url(#g)"'), 'gradients and same-document url(#id) references are kept, in canonical case');
+
+        $hostile = InlineSvg::sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 24 24" onload="alert(1)">'
+            . '<script>alert(2)</script><style>body{display:none}</style>'
+            . '<a href="javascript:alert(3)"><path d="M0 0"/></a>'
+            . '<foreignObject><div xmlns="http://www.w3.org/1999/xhtml">x</div></foreignObject>'
+            . '<use xlink:href="https://evil.test/x.svg#a"/><image href="https://evil.test/t.png"/>'
+            . '<rect fill="url(https://evil.test/p.svg#x)" stroke="javascript:alert(4)" width="1" height="1" onclick="alert(5)"/>'
+            . '<circle r="1" style="fill:red" class="x" xml:space="preserve"/>'
+            . '<svg><path d="M1 1"/></svg><?php echo 1; ?><![CDATA[<script>alert(6)</script>]]>'
+            . '</svg>'
+        );
+        foreach (['script', 'alert', 'style', 'onload', 'onclick', 'href', 'evil', 'foreignObject', 'xhtml', '<a', '<use', '<image', 'class="x"', 'xml:space', '<?', 'CDATA', 'javascript'] as $needle) {
+            maw_assert(!str_contains($hostile, $needle), 'hostile content is removed: ' . $needle);
+        }
+        maw_assert(str_contains($hostile, '<rect width="1" height="1"></rect>') && str_contains($hostile, '<circle r="1"></circle>'), 'safe shapes beside hostile content survive without their unsafe attributes');
+        maw_assert_same(1, substr_count($hostile, '<svg'), 'a nested svg is dropped');
+
+        $rejected = [
+            'entity declarations' => '<!DOCTYPE svg [<!ENTITY a "aaaa">]><svg xmlns="http://www.w3.org/2000/svg">&a;</svg>',
+            'external entities'   => '<!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]><svg xmlns="http://www.w3.org/2000/svg">&x;</svg>',
+            'malformed XML'       => '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"></svg>',
+            'a non-SVG root'      => '<html><body><svg/></body></html>',
+            'an XHTML root'       => '<svg xmlns="http://www.w3.org/1999/xhtml"/>',
+            'an empty file'       => '',
+            'an oversized file'   => '<svg xmlns="http://www.w3.org/2000/svg">' . str_repeat('<g></g>', 40000) . '</svg>',
+        ];
+        foreach ($rejected as $label => $source) {
+            maw_assert_same('', InlineSvg::sanitize($source), $label . ' are rejected');
+        }
+    },
+
+    'arrow SVGs from the media library render inline and take precedence over images' => static function (): void {
+        maw_car_setup();
+        $left  = maw_car_svg('left-a.svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>');
+        $right = maw_car_svg('right-a.svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>');
+        $base  = ['multiplegrid' => 'true', 'multiplegridlayout' => 'carousel', 'multiplegridlimititems' => '3'];
+
+        $html = maw_car_render($base + ['carouselarrowleftsvg' => (string) $left]);
+        maw_assert_same(
+            '<svg class="maw-carousel-arrow-icon maw-carousel-arrow-svg" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="currentColor"><path d="M15 5l-7 7 7 7"></path></svg>',
+            maw_car_arrow_icon($html, 'left'),
+            'an attachment ID renders the SVG code inline in the left arrow'
+        );
+        maw_assert(str_contains(maw_car_arrow_icon($html, 'right'), 'stroke="currentColor"'), 'the right arrow keeps the built-in icon');
+
+        $byUrl = maw_car_render($base + ['carouselarrowrightsvg' => 'https://example.test/wp-content/uploads/right-a.svg']);
+        maw_assert(str_contains(maw_car_arrow_icon($byUrl, 'right'), '<path d="M9 5l7 7-7 7"></path>'), 'a media-library URL resolves to the attachment');
+
+        $both = maw_car_render($base + ['carouselarrowleftsvg' => (string) $left, 'carouselarrowleftimgurl' => 'https://example.test/l.png']);
+        maw_assert(str_contains(maw_car_arrow_icon($both, 'left'), 'maw-carousel-arrow-svg') && !str_contains($both, 'l.png'), 'an SVG takes precedence over an arrow image');
+
+        $png      = maw_car_svg('arrow.png', 'not an svg', 'image/png');
+        $missing  = maw_car_svg('gone.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>');
+        @unlink(sys_get_temp_dir() . '/maw-tests-svg/gone.svg');
+        $script   = maw_car_svg('only-script.svg', '<script>alert(1)</script>');
+        $fallback = [
+            'a non-SVG attachment'      => (string) $png,
+            'a deleted file'            => (string) $missing,
+            'an unusable file'          => (string) $script,
+            'an unknown ID'             => '999999',
+            'a remote URL'              => 'https://evil.test/a.svg',
+            'a relative path'           => '../../wp-config.php',
+        ];
+        foreach ($fallback as $label => $value) {
+            $out = maw_car_render($base + ['carouselarrowleftsvg' => $value, 'carouselarrowleftimgurl' => 'https://example.test/l.png']);
+            maw_assert(str_contains(maw_car_arrow_icon($out, 'left'), '<img class="maw-carousel-arrow-icon" src="https://example.test/l.png"'), $label . ' falls back to the arrow image');
+        }
+
+        $nostyling = maw_car_render($base + ['carouselarrowleftsvg' => (string) $left, 'nostyling' => 'true']);
+        maw_assert(str_contains(maw_car_arrow_icon($nostyling, 'left'), 'maw-carousel-arrow-svg'), 'nostyling keeps the inline SVG');
+
+        Options::setShortcodes([['field' => 'brand_arrow', 'value' => (string) $right]]);
+        maw_assert(str_contains(maw_car_arrow_icon(maw_car_render($base + ['carouselarrowrightsvg' => '{{brand_arrow}}']), 'right'), 'maw-carousel-arrow-svg'), 'a {{field}} reference resolves to the SVG');
+    },
+
+    'searchable carousels store the arrow SVG and keep it on AJAX pages' => static function (): void {
+        maw_car_setup();
+        $left = maw_car_svg('left-b.svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3"/></svg>');
+        $atts = ['multiplegridusersearch' => 'true', 'multiplegridperpage' => '3', 'multiplegridlayout' => 'carousel'];
+
+        $html = maw_car_render($atts + ['carouselarrowleftsvg' => 'https://example.test/wp-content/uploads/left-b.svg']);
+        $key  = maw_car_attr($html, 'data-maw-grid-key');
+        maw_assert_same((string) $left, get_transient('maw_grid_' . $key)['carousel']['arrowleftsvg'] ?? null, 'the stored configuration holds the attachment ID');
+        maw_assert_same($key, maw_car_attr(maw_car_render($atts + ['carouselarrowleftsvg' => (string) $left]), 'data-maw-grid-key'), 'the URL and the ID of the same SVG share one configuration');
+        maw_assert($key !== maw_car_attr(maw_car_render($atts), 'data-maw-grid-key'), 'adding an SVG changes the key');
+
+        maw_assert(str_contains(maw_car_arrow_icon((string) maw_car_ajax($key, ['page' => '2'])['html'], 'left'), '<circle cx="4" cy="4" r="3"></circle>'), 'AJAX pages render the stored SVG');
+
+        $config = get_transient('maw_grid_' . $key);
+        $config['carousel']['arrowleftsvg'] = '<svg onload="alert(1)">';
+        set_transient('maw_grid_' . $key, $config, 86400);
+        maw_assert(str_contains(maw_car_arrow_icon((string) maw_car_ajax($key)['html'], 'left'), 'stroke="currentColor"'), 'a tampered stored value is validated again and falls back');
+    },
+
+    'the arrow SVG pickers render exactly what the shortcode renders' => static function (): void {
+        maw_car_setup();
+        $left = maw_car_svg('left-c.svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>');
+        $url  = 'https://example.test/wp-content/uploads/left-c.svg';
+        $base = ['media_platform' => 'youtube', 'youtube_playlist' => 'show', 'output_mode' => 'grid', 'multiplegridlayout' => 'carousel', 'carouselarrowleftsvg' => 'value'];
+
+        $expected = maw_car_render(['multiplegridlayout' => 'carousel', 'carouselarrowleftsvg' => (string) $left] + maw_car_flags('grid'));
+        maw_assert(str_contains($expected, 'maw-carousel-arrow-svg'), 'the shortcode inlines the SVG');
+
+        $values = [
+            'the classic Upload SVG value'        => ['value' => ['url' => $url, 'id' => $left], 'library' => 'svg'],
+            'the atomic value as stored'          => ['$$type' => 'svg-src', 'value' => ['id' => ['$$type' => 'image-attachment-id', 'value' => $left], 'url' => null]],
+            'the atomic value as resolved'        => ['html' => '<svg></svg>', 'url' => $url],
+            'a plain attachment ID'               => (string) $left,
+        ];
+        foreach ($values as $label => $value) {
+            maw_assert_same($expected, WidgetRenderer::render($base + ['carouselarrowleftsvg_value' => $value], 'abc1234', false), $label . ' renders like the shortcode');
+        }
+
+        $plan = static function ($value): array {
+            $calls = SettingsAdapter::plan(['carouselarrowleftsvg_value' => $value] + ['media_platform' => 'youtube', 'youtube_playlist' => 'show', 'output_mode' => 'grid', 'multiplegridlayout' => 'carousel', 'carouselarrowleftsvg' => 'value'], 'abc1234')['calls'];
+            return end($calls)['atts'] ?? [];
+        };
+        maw_assert(!array_key_exists('carouselarrowleftsvg', $plan(['value' => 'fas fa-chevron-left', 'library' => 'fa-solid'])), 'an icon-library value (not offered) is ignored');
+        maw_assert(!array_key_exists('carouselarrowleftsvg', $plan(['value' => '', 'library' => ''])), 'an empty picker omits the attribute');
+        maw_assert(!array_key_exists('carouselarrowleftsvg', $plan(null)), 'an unset atomic value omits the attribute');
+
+        $grid = SettingsAdapter::plan(['multiplegridlayout' => 'grid', 'carouselarrowleftsvg_value' => (string) $left] + $base, 'abc1234')['calls'];
+        maw_assert(!array_key_exists('carouselarrowleftsvg', end($grid)['atts'] ?? []), 'the SVG never reaches a grid');
+
+        $text = ShortcodeText::forSettings($base + ['carouselarrowleftsvg_value' => ['value' => ['url' => $url, 'id' => $left], 'library' => 'svg']], 'x');
+        maw_assert(str_contains($text, 'carouselarrowleftsvg="' . $left . '"'), 'plain content carries the attachment ID');
+
+        $specs = WidgetSchema::attributeSpecs();
+        maw_assert_same(['svg', 'svg'], [$specs['carouselarrowleftsvg']['kind'], $specs['carouselarrowrightsvg']['kind']], 'both arrows have an SVG picker');
+        maw_assert(WidgetSchema::hasValueControl($specs['carouselarrowleftsvg']), 'the picker is the value control');
+        $keys = array_keys($specs);
+        maw_assert(array_search('carouselarrowleftsvg', $keys, true) < array_search('carouselarrowleftimgurl', $keys, true), 'the SVG pickers come before the image pickers they override');
     },
 ];

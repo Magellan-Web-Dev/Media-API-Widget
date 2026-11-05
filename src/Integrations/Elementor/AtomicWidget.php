@@ -4,6 +4,7 @@ namespace MediaApiWidget\Integrations\Elementor;
 use Elementor\Modules\AtomicWidgets\Controls\Section;
 use Elementor\Modules\AtomicWidgets\Controls\Types\Number_Control;
 use Elementor\Modules\AtomicWidgets\Controls\Types\Select_Control;
+use Elementor\Modules\AtomicWidgets\Controls\Types\Svg_Control;
 use Elementor\Modules\AtomicWidgets\Controls\Types\Text_Control;
 use Elementor\Modules\AtomicWidgets\DynamicTags\Dynamic_Prop_Type;
 use Elementor\Modules\AtomicWidgets\Elements\Base\Atomic_Widget_Base;
@@ -14,6 +15,7 @@ use Elementor\Modules\AtomicWidgets\PropTypes\Attributes_Prop_Type;
 use Elementor\Modules\AtomicWidgets\PropTypes\Classes_Prop_Type;
 use Elementor\Modules\AtomicWidgets\PropTypes\Primitives\Number_Prop_Type;
 use Elementor\Modules\AtomicWidgets\PropTypes\Primitives\String_Prop_Type;
+use Elementor\Modules\AtomicWidgets\PropTypes\Svg_Src_Prop_Type;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -142,9 +144,14 @@ final class AtomicWidget extends Atomic_Widget_Base
                 continue;
             }
 
-            $value = $spec['kind'] === 'number'
-                ? Number_Prop_Type::make()->default(is_numeric($spec['default_value']) ? (int) $spec['default_value'] : null)
-                : String_Prop_Type::make()->default((string) $spec['default_value']);
+            if ($spec['kind'] === 'number') {
+                $value = Number_Prop_Type::make()->default(is_numeric($spec['default_value']) ? (int) $spec['default_value'] : null);
+            } elseif ($spec['kind'] === 'svg' && self::svgPickerAvailable()) {
+                // Elementor's SVG picker value: an attachment id and/or URL.
+                $value = Svg_Src_Prop_Type::make();
+            } else {
+                $value = String_Prop_Type::make()->default((string) $spec['default_value']);
+            }
 
             $schema[WidgetSchema::valueKey($key)] = $value->set_dependencies(self::dependencies(WidgetSchema::valueWhen($key, $spec)));
         }
@@ -207,12 +214,17 @@ final class AtomicWidget extends Atomic_Widget_Base
                 }
 
                 $valueKey = WidgetSchema::valueKey($key);
-                $value    = $spec['kind'] === 'number'
-                    ? Number_Control::bind_to($valueKey)->set_min(0)->set_step(1)->set_should_force_int(true)
-                    : Text_Control::bind_to($valueKey);
+                if ($spec['kind'] === 'number') {
+                    $value = Number_Control::bind_to($valueKey)->set_min(0)->set_step(1)->set_should_force_int(true);
+                } elseif ($spec['kind'] === 'svg' && self::svgPickerAvailable()) {
+                    // Upload an SVG or choose one from the media library.
+                    $value = Svg_Control::bind_to($valueKey)->set_show_icon_library(false);
+                } else {
+                    $value = Text_Control::bind_to($valueKey);
+                }
 
                 $placeholder = $spec['placeholder'] !== '' ? $spec['placeholder'] : self::kindPlaceholder($spec['kind']);
-                if ($placeholder !== '') {
+                if ($placeholder !== '' && method_exists($value, 'set_placeholder')) {
                     $value->set_placeholder($placeholder);
                 }
 
@@ -339,6 +351,19 @@ final class AtomicWidget extends Atomic_Widget_Base
     }
 
     /**
+     * Whether this Elementor version has the atomic SVG picker.
+     *
+     * Without it an SVG setting falls back to a text field for the SVG's
+     * media-library URL or attachment ID, so the widget still registers.
+     *
+     * @return bool True when Svg_Control and Svg_Src_Prop_Type exist.
+     */
+    private static function svgPickerAvailable(): bool
+    {
+        return class_exists(Svg_Control::class) && class_exists(Svg_Src_Prop_Type::class);
+    }
+
+    /**
      * Returns a placeholder hinting at the expected format of a text control.
      *
      * @param string $kind Spec kind.
@@ -350,6 +375,7 @@ final class AtomicWidget extends Atomic_Widget_Base
             case 'color':
                 return '#ffffff';
             case 'image':
+            case 'svg':
                 return 'https://';
             default:
                 return '';

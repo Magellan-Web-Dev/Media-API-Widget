@@ -20,8 +20,8 @@ if (!defined('ABSPATH')) { exit; }
  *   `field:{name}` — so the widget can express every state a shortcode can:
  *   attribute omitted (global default applies), attribute set, attribute set to
  *   an empty string, or attribute set to a `{{field_name}}` reference.
- *   Free-form kinds (text, color, number, image) add a separate `{key}_value`
- *   control shown only while the source is `value`.
+ *   Free-form kinds (text, color, number, image, svg) add a separate
+ *   `{key}_value` control shown only while the source is `value`.
  *
  * Visibility rules ("when") are a flat list of `[setting, operator, value]`
  * leaves that must all hold. They are deliberately kept to a conjunction of
@@ -67,7 +67,7 @@ final class WidgetSchema
     public const NON_CUSTOM_PODCAST_PLATFORMS = ['omny', 'soundcloud', 'buzzsprout', 'other', 'embed'];
 
     /** Kinds stored as a source select plus a separate value control. */
-    private const FREE_FORM_KINDS = ['text', 'color', 'number', 'image'];
+    private const FREE_FORM_KINDS = ['text', 'color', 'number', 'image', 'svg'];
 
     /** @var array<string,array<string,mixed>>|null Per-request cache of the attribute specs. */
     private static ?array $attributeSpecs = null;
@@ -250,7 +250,9 @@ final class WidgetSchema
      *
      * Spec fields:
      * - attr    — the shortcode attribute the setting fills.
-     * - kind    — bool | enum | text | color | number | image.
+     * - kind    — bool | enum | text | color | number | image | svg. An svg
+     *             is picked or uploaded through Elementor's SVG picker and
+     *             passed to the shortcode as an attachment ID or URL.
      * - target  — 'main' (default) or 'bar' for the search bar rendered above a
      *             searchable grid.
      * - default — default source; free-form kinds may default to 'value' with
@@ -385,11 +387,24 @@ final class WidgetSchema
                 ],
                 'description' => __('How far one arrow click moves. Searchable carousels: arrows move within the loaded result page; the pagination below loads other pages.', 'media-api-widget'),
             ]),
+            'carouseltransitionduration' => self::spec('carouseltransitionduration', 'text', 'carousel', __('Transition duration', 'media-api-widget'), [$grids, $carousel], [
+                'hint'        => '0.25s',
+                'placeholder' => '0.25s',
+                'description' => __('How long each move takes: 0.25s, 400ms, or a plain number of milliseconds. Also accepts a CSS variable such as var(--slide-speed), var(--slide-speed, 300ms), or calc() / min() / max() / clamp(). 0 moves instantly.', 'media-api-widget'),
+            ]),
+            'carouselarrowleftsvg' => self::spec('carouselarrowleftsvg', 'svg', 'carousel', __('Left arrow SVG', 'media-api-widget'), [$grids, $carousel], [
+                'hint'        => __('built-in arrow', 'media-api-widget'),
+                'description' => __('Upload an SVG or choose one from the media library. It is placed in the page as SVG code, so it takes the arrow color (unless the SVG sets its own colors) and the arrow icon size. Takes precedence over the arrow image.', 'media-api-widget'),
+            ]),
+            'carouselarrowrightsvg' => self::spec('carouselarrowrightsvg', 'svg', 'carousel', __('Right arrow SVG', 'media-api-widget'), [$grids, $carousel], [
+                'hint'        => __('built-in arrow', 'media-api-widget'),
+                'description' => __('Upload an SVG or choose one from the media library. Takes precedence over the arrow image.', 'media-api-widget'),
+            ]),
             'carouselarrowleftimgurl' => self::spec('carouselarrowleftimgurl', 'image', 'carousel', __('Left arrow image', 'media-api-widget'), [$grids, $carousel], [
-                'description' => __('Default uses the built-in arrow.', 'media-api-widget'),
+                'description' => __('Shown as an image (PNG, JPG, …). Used when no left arrow SVG is set; default uses the built-in arrow.', 'media-api-widget'),
             ]),
             'carouselarrowrightimgurl' => self::spec('carouselarrowrightimgurl', 'image', 'carousel', __('Right arrow image', 'media-api-widget'), [$grids, $carousel], [
-                'description' => __('Default uses the built-in arrow.', 'media-api-widget'),
+                'description' => __('Shown as an image (PNG, JPG, …). Used when no right arrow SVG is set; default uses the built-in arrow.', 'media-api-widget'),
             ]),
             'carouselarrowsize' => self::spec('carouselarrowsize', 'text', 'carousel', __('Arrow button size', 'media-api-widget'), [$grids, $carousel], ['placeholder' => '48px']),
             'carouselarrowiconsize' => self::spec('carouselarrowiconsize', 'text', 'carousel', __('Arrow icon size', 'media-api-widget'), [$grids, $carousel], ['placeholder' => '24px']),

@@ -474,6 +474,9 @@ final class AboutPage
                 <div class="maw-callout">
                     <strong>New in 6.1.0.</strong> The default layout is still the grid, so existing shortcodes and widgets look exactly as before until you choose the carousel.
                 </div>
+                <div class="maw-callout">
+                    <strong>New in 6.1.1.</strong> Set how long each move takes with <code>carouseltransitionduration</code> (Elementor: <strong>Transition duration</strong>), including from your own CSS variables, and use SVG arrows that are placed in the page as SVG code &mdash; like the Loop Carousel's arrows &mdash; with <code>carouselarrowleftsvg</code> / <code>carouselarrowrightsvg</code> (Elementor: <strong>Left/Right arrow SVG &rarr; Upload SVG</strong>).
+                </div>
 
                 <h3>Turning It On</h3>
                 <table class="widefat striped maw-table maw-about-table">
@@ -492,7 +495,10 @@ final class AboutPage
                         <tr><td><code>multiplegridminsize</code><br>(Minimum item width)</td><td><code>400px</code></td><td>Cards never get narrower than this &mdash; unless only one card fits, which then fills the full width.</td></tr>
                         <tr><td><code>multiplegridgap</code><br>(Gap)</td><td><code>48px</code></td><td>Space between cards.</td></tr>
                         <tr><td><code>carouselstep</code><br>(Arrow step)</td><td><code>item</code></td><td><code>item</code> moves one card per arrow click; <code>group</code> moves as many cards as are visible.</td></tr>
-                        <tr><td><code>carouselarrowleftimgurl</code><br>(Left arrow image)</td><td><em>built-in arrow</em></td><td>Image for the left arrow.</td></tr>
+                        <tr><td><code>carouseltransitionduration</code><br>(Transition duration)</td><td><code>0.25s</code></td><td>How long each arrow, keyboard or drag-release move takes: <code>0.6s</code>, <code>400ms</code>, a plain number of milliseconds, or <code>0</code> for instant moves. Also accepts a CSS variable such as <code>var(--slide-speed)</code> or <code>var(--slide-speed, 300ms)</code>, and <code>calc()</code> / <code>min()</code> / <code>max()</code> / <code>clamp()</code>.</td></tr>
+                        <tr><td><code>carouselarrowleftsvg</code><br>(Left arrow SVG)</td><td><em>none</em></td><td>An SVG from the media library (its attachment ID or URL), placed in the page as SVG code so it takes the arrow color and icon size &mdash; unless the SVG sets its own colors. Takes precedence over the left arrow image.</td></tr>
+                        <tr><td><code>carouselarrowrightsvg</code><br>(Right arrow SVG)</td><td><em>none</em></td><td>The same for the right arrow.</td></tr>
+                        <tr><td><code>carouselarrowleftimgurl</code><br>(Left arrow image)</td><td><em>built-in arrow</em></td><td>Image for the left arrow, used when no left arrow SVG is set.</td></tr>
                         <tr><td><code>carouselarrowrightimgurl</code><br>(Right arrow image)</td><td><em>built-in arrow</em></td><td>Image for the right arrow. Each side falls back to the built-in arrow on its own.</td></tr>
                         <tr><td><code>carouselarrowsize</code><br>(Arrow button size)</td><td><code>48px</code></td><td>Width and height of each arrow button.</td></tr>
                         <tr><td><code>carouselarrowiconsize</code><br>(Arrow icon size)</td><td><code>24px</code></td><td>Size of the arrow icon or image inside the button.</td></tr>
@@ -501,7 +507,7 @@ final class AboutPage
                         <tr><td><code>carouselarrowoffset</code><br>(Arrow offset)</td><td><code>12px</code></td><td>Space between an arrow and the cards (or the inset from the edge when arrows overlay the cards).</td></tr>
                     </tbody>
                 </table>
-                <p class="description">Sizes accept <code>px</code>, <code>rem</code>, <code>em</code>, <code>%</code> (of the carousel's width), <code>vw</code> and other CSS units, a plain number (pixels), or <code>calc()</code> / <code>clamp()</code>. Colors accept hex, <code>rgb()</code>/<code>rgba()</code>, color names, or a CSS variable such as an Elementor global color. An invalid value falls back to the default shown above. All other grid, search, card, lightbox and podcast attributes, <code>&#123;&#123;field&#125;&#125;</code> references, and same-named stored-field defaults work exactly as they do for a grid.</p>
+                <p class="description">Sizes accept <code>px</code>, <code>rem</code>, <code>em</code>, <code>%</code> (of the carousel's width), <code>vw</code> and other CSS units, a plain number (pixels), or <code>calc()</code> / <code>clamp()</code>. Times accept <code>s</code>, <code>ms</code>, a plain number (milliseconds), a CSS variable or <code>calc()</code>. Colors accept hex, <code>rgb()</code>/<code>rgba()</code>, color names, or a CSS variable such as an Elementor global color. An invalid value falls back to the default shown above. All other grid, search, card, lightbox and podcast attributes, <code>&#123;&#123;field&#125;&#125;</code> references, and same-named stored-field defaults work exactly as they do for a grid.</p>
 
                 <h3>How Cards Are Sized</h3>
                 <p>The carousel shows as many cards as fit at the minimum width, then shares the space evenly between them: <code>visible cards = floor((available width + gap) &divide; (minimum width + gap))</code>, at least one and never more than there are cards. With a <code>300px</code> minimum and a <code>24px</code> gap:</p>
@@ -522,8 +528,25 @@ final class AboutPage
                     <li><strong>Computers:</strong> scroll sideways with a trackpad or a horizontal mouse wheel, or <strong>click and drag</strong> the row with the mouse. Scrolling always settles on a card edge.</li>
                     <li>Swiping or dragging never opens a video or podcast. A normal click or tap on a card plays it, exactly as in a grid, and clicking an arrow never plays anything.</li>
                     <li><strong>Keyboard:</strong> the arrows are labelled buttons with a visible focus ring (Enter or Space). Focusing the row lets the arrow keys, Page Up/Down and Home/End move through it.</li>
-                    <li>Visitors who have turned on their device's reduce-motion setting see moves happen instantly instead of animating.</li>
+                    <li>Visitors who have turned on their device's reduce-motion setting see moves happen instantly instead of animating, whatever the transition duration.</li>
                     <li>Several carousels on one page &mdash; even for the same playlist &mdash; scroll independently.</li>
+                </ul>
+
+                <h3>Transition Duration</h3>
+                <p><code>carouseltransitionduration</code> sets how long arrow, keyboard and drag-release moves take (swipes and trackpads keep the device's own feel). It becomes the <code>--maw-carousel-transition-duration</code> CSS variable, which the browser resolves &mdash; so it can point at your own variable and change with your media queries:</p>
+                <pre class="maw-code">carouseltransitionduration="var(--slide-speed, 300ms)"
+
+:root { --slide-speed: 450ms; }
+@media (max-width: 767px) { :root { --slide-speed: 250ms; } }</pre>
+                <p class="description">A <code>var()</code> whose variable is not defined (and has no fallback) uses <code>0.25s</code>. A variable that holds something other than a time is invalid CSS, which browsers treat as an instant move.</p>
+
+                <h3>Arrow SVGs</h3>
+                <p>An arrow SVG is written into the page as SVG code, the way Elementor's Loop Carousel renders its arrow icons, so it takes the <strong>arrow color</strong> and <strong>arrow icon size</strong>. An SVG that sets its own fill colors keeps them, and an outline icon with <code>fill="none"</code> stays an outline.</p>
+                <ul>
+                    <li><strong>Elementor:</strong> in <strong>Carousel Navigation</strong>, set <strong>Left arrow SVG</strong> / <strong>Right arrow SVG</strong> to <em>Custom value</em>, then <strong>Upload SVG</strong> to upload a file or pick one from the media library. The first time, Elementor asks an administrator to enable <em>Unfiltered File Uploads</em>, as it does for the Loop Carousel &mdash; WordPress blocks SVG uploads otherwise.</li>
+                    <li><strong>Shortcode:</strong> <code>carouselarrowleftsvg="123"</code> (the attachment ID, from <code>post.php?post=123</code> when editing the file) or the file's media-library URL.</li>
+                    <li><strong>Safety:</strong> the SVG is rebuilt from an allowlist of drawing elements and attributes before it is placed in the page. Scripts, event handlers, links, <code>&lt;style&gt;</code> blocks and external references are removed; a file that is not a valid SVG, declares entities, or is over 256&nbsp;KB is not used. Only media-library SVGs are used &mdash; remote files are never fetched.</li>
+                    <li>An SVG's own <code>&lt;style&gt;</code> block (common in Illustrator exports) is removed, so those shapes take the arrow color. Export with presentation attributes to keep several colors.</li>
                 </ul>
 
                 <h3 id="maw-carousel-search">Searchable Carousels</h3>
@@ -571,6 +594,20 @@ final class AboutPage
     carouselarrowsize="3.5rem"
     carouselarrowiconsize="2.5rem"
     carouselarrowoffset="0.5rem"
+]</pre>
+
+                <p><strong>Inline SVG arrows in the brand color, with slower moves:</strong></p>
+                <pre class="maw-code">[media-api-widget-render
+    playlist_name="my_show"
+    media_platform="youtube"
+    multiplegrid="true"
+    multiplegridlayout="carousel"
+    carouselarrowleftsvg="123"
+    carouselarrowrightsvg="124"
+    carouselarrowcolor="var(--e-global-color-primary)"
+    carouselarrowbackground="transparent"
+    carouselarrowiconsize="2rem"
+    carouseltransitionduration="0.6s"
 ]</pre>
 
                 <p><strong>Searchable carousel with its search bar:</strong></p>

@@ -3,6 +3,7 @@ namespace MediaApiWidget\Frontend;
 
 use MediaApiWidget\Config\Options;
 use MediaApiWidget\PostIndex\RefreshManifest;
+use MediaApiWidget\Support\InlineSvg;
 use MediaApiWidget\Support\MediaStore;
 use MediaApiWidget\Support\PodcastNumbering;
 use MediaApiWidget\Support\SafeRemoteRequest;
@@ -39,12 +40,13 @@ final class Shortcode
      * defaults (48px / 400px), which the carousel reuses.
      */
     public const CAROUSEL_DEFAULTS = [
-        'carouselstep'            => 'item',
-        'carouselarrowsize'       => '48px',
-        'carouselarrowiconsize'   => '24px',
-        'carouselarrowcolor'      => '#ffffff',
-        'carouselarrowbackground' => 'rgba(0, 0, 0, 0.6)',
-        'carouselarrowoffset'     => '12px',
+        'carouselstep'               => 'item',
+        'carouselarrowsize'          => '48px',
+        'carouselarrowiconsize'      => '24px',
+        'carouselarrowcolor'         => '#ffffff',
+        'carouselarrowbackground'    => 'rgba(0, 0, 0, 0.6)',
+        'carouselarrowoffset'        => '12px',
+        'carouseltransitionduration' => '0.25s',
     ];
 
     /**
@@ -171,11 +173,14 @@ final class Shortcode
             'carouselstep' => self::CAROUSEL_DEFAULTS['carouselstep'],
             'carouselarrowleftimgurl' => '',
             'carouselarrowrightimgurl' => '',
+            'carouselarrowleftsvg' => '',
+            'carouselarrowrightsvg' => '',
             'carouselarrowsize' => self::CAROUSEL_DEFAULTS['carouselarrowsize'],
             'carouselarrowiconsize' => self::CAROUSEL_DEFAULTS['carouselarrowiconsize'],
             'carouselarrowcolor' => self::CAROUSEL_DEFAULTS['carouselarrowcolor'],
             'carouselarrowbackground' => self::CAROUSEL_DEFAULTS['carouselarrowbackground'],
             'carouselarrowoffset' => self::CAROUSEL_DEFAULTS['carouselarrowoffset'],
+            'carouseltransitionduration' => self::CAROUSEL_DEFAULTS['carouseltransitionduration'],
             'nostyling' => 'false',
             'noresults' => '',
             'podcastplayermode' => '',
@@ -256,11 +261,14 @@ final class Shortcode
             'carouselstep' => (string) $atts['carouselstep'],
             'carouselarrowleftimgurl' => (string) $atts['carouselarrowleftimgurl'],
             'carouselarrowrightimgurl' => (string) $atts['carouselarrowrightimgurl'],
+            'carouselarrowleftsvg' => (string) $atts['carouselarrowleftsvg'],
+            'carouselarrowrightsvg' => (string) $atts['carouselarrowrightsvg'],
             'carouselarrowsize' => (string) $atts['carouselarrowsize'],
             'carouselarrowiconsize' => (string) $atts['carouselarrowiconsize'],
             'carouselarrowcolor' => (string) $atts['carouselarrowcolor'],
             'carouselarrowbackground' => (string) $atts['carouselarrowbackground'],
             'carouselarrowoffset' => (string) $atts['carouselarrowoffset'],
+            'carouseltransitionduration' => (string) $atts['carouseltransitionduration'],
             'nostyling' => $this->isTruthy((string) $atts['nostyling']),
             'noresults' => sanitize_text_field((string) $atts['noresults']),
             'podcastplayermode' => (string) $atts['podcastplayermode'],
@@ -1314,11 +1322,14 @@ final class Shortcode
             'step'            => (string) ($itemData['carouselstep'] ?? ''),
             'arrowleft'       => (string) ($itemData['carouselarrowleftimgurl'] ?? ''),
             'arrowright'      => (string) ($itemData['carouselarrowrightimgurl'] ?? ''),
+            'arrowleftsvg'    => (string) ($itemData['carouselarrowleftsvg'] ?? ''),
+            'arrowrightsvg'   => (string) ($itemData['carouselarrowrightsvg'] ?? ''),
             'arrowsize'       => (string) ($itemData['carouselarrowsize'] ?? ''),
             'arrowiconsize'   => (string) ($itemData['carouselarrowiconsize'] ?? ''),
             'arrowcolor'      => (string) ($itemData['carouselarrowcolor'] ?? ''),
             'arrowbackground' => (string) ($itemData['carouselarrowbackground'] ?? ''),
             'arrowoffset'     => (string) ($itemData['carouselarrowoffset'] ?? ''),
+            'transition'      => (string) ($itemData['carouseltransitionduration'] ?? ''),
         ]);
     }
 
@@ -1343,11 +1354,14 @@ final class Shortcode
             'step'            => strtolower($text('step')) === 'group' ? 'group' : 'item',
             'arrowleft'       => $text('arrowleft'),
             'arrowright'      => $text('arrowright'),
+            'arrowleftsvg'    => $this->sanitizeSvgReference($text('arrowleftsvg')),
+            'arrowrightsvg'   => $this->sanitizeSvgReference($text('arrowrightsvg')),
             'arrowsize'       => $this->sanitizeCssLength($text('arrowsize'), self::CAROUSEL_DEFAULTS['carouselarrowsize'], false),
             'arrowiconsize'   => $this->sanitizeCssLength($text('arrowiconsize'), self::CAROUSEL_DEFAULTS['carouselarrowiconsize'], false),
             'arrowcolor'      => $this->sanitizeCssColor($text('arrowcolor'), self::CAROUSEL_DEFAULTS['carouselarrowcolor']),
             'arrowbackground' => $this->sanitizeCssColor($text('arrowbackground'), self::CAROUSEL_DEFAULTS['carouselarrowbackground']),
             'arrowoffset'     => $this->sanitizeCssLength($text('arrowoffset'), self::CAROUSEL_DEFAULTS['carouselarrowoffset'], true),
+            'transition'      => $this->sanitizeCssTime($text('transition'), self::CAROUSEL_DEFAULTS['carouseltransitionduration']),
         ];
     }
 
@@ -1422,7 +1436,8 @@ final class Shortcode
             ' --maw-carousel-arrow-icon-size: ' . $layout['arrowiconsize'] . ';' .
             ' --maw-carousel-arrow-offset: ' . $layout['arrowoffset'] . ';' .
             ' --maw-carousel-arrow-color: ' . $layout['arrowcolor'] . ';' .
-            ' --maw-carousel-arrow-background: ' . $layout['arrowbackground'] . ';';
+            ' --maw-carousel-arrow-background: ' . $layout['arrowbackground'] . ';' .
+            ' --maw-carousel-transition-duration: ' . $layout['transition'] . ';';
 
         $group = $layout['step'] === 'group';
 
@@ -1432,31 +1447,38 @@ final class Shortcode
                 ' data-maw-carousel-step="' . esc_attr($layout['step']) . '"' .
                 ' style="' . esc_attr($style) . '"' .
             '>' .
-                $this->renderCarouselArrow('left', $group ? __('Previous items', 'media-api-widget') : __('Previous item', 'media-api-widget'), $layout['arrowleft'], $noStyling) .
+                $this->renderCarouselArrow('left', $group ? __('Previous items', 'media-api-widget') : __('Previous item', 'media-api-widget'), $layout['arrowleft'], $layout['arrowleftsvg'] ?? '', $noStyling) .
                 '<div class="maw-carousel-viewport" data-maw-carousel-viewport="" role="group" aria-roledescription="' . esc_attr__('carousel', 'media-api-widget') . '" aria-label="' . esc_attr__('Media items', 'media-api-widget') . '" tabindex="0">' .
                     '<div class="maw-carousel-track" data-maw-carousel-track="">' . $slides . '</div>' .
                 '</div>' .
-                $this->renderCarouselArrow('right', $group ? __('Next items', 'media-api-widget') : __('Next item', 'media-api-widget'), $layout['arrowright'], $noStyling) .
+                $this->renderCarouselArrow('right', $group ? __('Next items', 'media-api-widget') : __('Next item', 'media-api-widget'), $layout['arrowright'], $layout['arrowrightsvg'] ?? '', $noStyling) .
             '</div>';
     }
 
     /**
      * Renders one carousel arrow button.
      *
-     * A custom image replaces the built-in chevron for that direction only.
-     * The image is decorative (empty alt): the button's own label names it.
+     * The icon, for that direction only, is the first of: an SVG from the
+     * media library, rendered inline (so it takes the arrow color, like
+     * Elementor's Loop Carousel arrows); a custom image; the built-in chevron.
+     * An SVG that cannot be read falls through to the next. The icon is
+     * decorative (aria-hidden / empty alt): the button's own label names it.
      *
      * @param string $side      'left' or 'right'.
      * @param string $label     Accessible button label.
-     * @param string $imageUrl  Custom arrow image URL, or '' for the built-in arrow.
+     * @param string $imageUrl  Custom arrow image URL, or ''.
+     * @param string $svgId     Validated SVG attachment ID, or ''.
      * @param bool   $noStyling Whether nostyling is in effect.
      * @return string Button HTML.
      */
-    private function renderCarouselArrow(string $side, string $label, string $imageUrl, bool $noStyling): string
+    private function renderCarouselArrow(string $side, string $label, string $imageUrl, string $svgId, bool $noStyling): string
     {
         $imageUrl = trim($imageUrl) !== '' ? esc_url($imageUrl) : '';
+        $svg      = $svgId !== '' ? InlineSvg::forAttachment((int) $svgId, 'maw-carousel-arrow-icon maw-carousel-arrow-svg') : '';
 
-        if ($imageUrl !== '') {
+        if ($svg !== '') {
+            $icon = $svg;
+        } elseif ($imageUrl !== '') {
             $icon = '<img class="maw-carousel-arrow-icon" src="' . $imageUrl . '" alt="" draggable="false">';
         } else {
             $path = $side === 'left' ? 'M15 5l-7 7 7 7' : 'M9 5l7 7-7 7';
@@ -1509,6 +1531,74 @@ final class Shortcode
         }
 
         return $default;
+    }
+
+    /**
+     * Validates a carousel arrow SVG reference.
+     *
+     * @param string $value Attachment ID or media-library URL.
+     * @return string The SVG attachment ID, or '' when the value is not an SVG
+     *                in the media library.
+     */
+    private function sanitizeSvgReference(string $value): string
+    {
+        $id = InlineSvg::attachmentId($value);
+
+        return $id > 0 ? (string) $id : '';
+    }
+
+    /**
+     * Validates a CSS time for the carousel transition duration.
+     *
+     * Accepts a non-negative number in `s` or `ms`, a bare number (read as
+     * milliseconds, as carousel libraries do), or a `var()`, `calc()`, `min()`,
+     * `max()` or `clamp()` expression made only of numbers, `s`/`ms` units,
+     * arithmetic and custom property names — for example `var(--speed)`,
+     * `var(--speed, 300ms)` or `calc(var(--speed) * 2)`. The browser resolves
+     * the expression; the front-end script reads the result. Custom property
+     * names keep their case, since CSS treats them as case-sensitive. Anything
+     * else — including values that could break out of the inline style —
+     * yields the default.
+     *
+     * @param string $value   Raw value.
+     * @param string $default Fallback time.
+     * @return string Validated CSS time.
+     */
+    private function sanitizeCssTime(string $value, string $default): string
+    {
+        $v = trim($value);
+        if ($v === '' || strlen($v) > 120) {
+            return $default;
+        }
+
+        if (preg_match('/^\d*\.?\d+$/', $v) === 1) {
+            return $v . 'ms';
+        }
+
+        if (preg_match('/^\d*\.?\d+m?s$/i', $v) === 1) {
+            return strtolower($v);
+        }
+
+        if (preg_match('/^(?:var|calc|min|max|clamp)\(.*\)$/is', $v) !== 1) {
+            return $default;
+        }
+
+        $depth = 0;
+        foreach (str_split($v) as $char) {
+            $depth += $char === '(' ? 1 : ($char === ')' ? -1 : 0);
+            if ($depth < 0) {
+                return $default;
+            }
+        }
+
+        // Strip every permitted token; anything left over is not allowed.
+        $rest = preg_replace(
+            ['/--[a-z0-9_-]+/i', '/\b(?:var|calc|min|max|clamp)\(/i', '/\d*\.?\d+(?:ms|s)?/i', '/[\s+\-*\/,()]/'],
+            '',
+            $v
+        );
+
+        return $depth === 0 && $rest === '' ? $v : $default;
     }
 
     /**

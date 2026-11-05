@@ -271,6 +271,16 @@ final class ClassicWidget extends Widget_Base
                 $args['type']    = Controls_Manager::MEDIA;
                 $args['default'] = ['url' => (string) $spec['default_value']];
                 break;
+            case 'svg':
+                // The Loop Carousel's arrow picker, limited to "Upload SVG":
+                // upload a new SVG or choose one from the media library.
+                // Elementor handles SVG upload permission and sanitizing.
+                $args['type']                   = Controls_Manager::ICONS;
+                $args['skin']                   = 'inline';
+                $args['label_block']            = false;
+                $args['exclude_inline_options'] = ['icon'];
+                $args['default']                = ['value' => '', 'library' => ''];
+                break;
             default:
                 $args['type']        = Controls_Manager::TEXT;
                 $args['label_block'] = true;

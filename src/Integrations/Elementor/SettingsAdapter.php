@@ -307,6 +307,10 @@ final class SettingsAdapter
      */
     private static function literal($raw, string $kind): string
     {
+        if ($kind === 'svg') {
+            return self::svgReference($raw);
+        }
+
         if ($kind === 'image' && is_array($raw)) {
             $raw = $raw['url'] ?? '';
         }
@@ -322,5 +326,59 @@ final class SettingsAdapter
         }
 
         return WidgetSchema::scalar($raw);
+    }
+
+    /**
+     * Reduces an SVG picker value to an attachment ID or URL.
+     *
+     * Accepts the classic ICONS control value (`{value: {id, url}, library:
+     * 'svg'}`; an icon-library choice yields ''), the atomic SVG value as
+     * stored (`{id, url}`, possibly `$$type`-wrapped) or as resolved for
+     * rendering (`{html, url}`), and a plain ID or URL string. The ID wins
+     * when present; the shortcode resolves either to the same attachment.
+     *
+     * @param mixed $raw Raw value.
+     * @return string Attachment ID, URL, or ''.
+     */
+    private static function svgReference($raw): string
+    {
+        $raw = self::unwrapTyped($raw);
+        if (!is_array($raw)) {
+            return trim(WidgetSchema::scalar($raw));
+        }
+
+        if (array_key_exists('library', $raw)) {
+            if ($raw['library'] !== 'svg') {
+                return '';
+            }
+            $raw = self::unwrapTyped($raw['value'] ?? null);
+            if (!is_array($raw)) {
+                return '';
+            }
+        }
+
+        $id = self::unwrapTyped($raw['id'] ?? null);
+        if (is_numeric($id) && (int) $id > 0) {
+            return (string) (int) $id;
+        }
+
+        $url = self::unwrapTyped($raw['url'] ?? null);
+
+        return is_string($url) ? trim($url) : '';
+    }
+
+    /**
+     * Unwraps atomic `{$$type, value}` prop values.
+     *
+     * @param mixed $value Possibly wrapped value.
+     * @return mixed Inner value.
+     */
+    private static function unwrapTyped($value)
+    {
+        while (is_array($value) && isset($value['$$type']) && array_key_exists('value', $value)) {
+            $value = $value['value'];
+        }
+
+        return $value;
     }
 }

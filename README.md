@@ -475,7 +475,10 @@ The default is `grid`, so existing content is unchanged. On a single card, title
 | `multiplegridminsize` | `400px` | Minimum card width. Shared with the grid. |
 | `multiplegridgap` | `48px` | Space between cards. Shared with the grid. |
 | `carouselstep` | `item` | How far one arrow click moves: `item` (one card) or `group` (as many cards as are currently visible). Any other value means `item`. |
-| `carouselarrowleftimgurl` | _(built-in arrow)_ | Image URL for the left arrow. |
+| `carouseltransitionduration` | `0.25s` | How long each arrow, keyboard or drag-release move takes. `s` or `ms` (a plain number is milliseconds, e.g. `400`), `0` for instant moves, or a CSS variable / math function such as `var(--slide-speed)`, `var(--slide-speed, 300ms)` or `calc(var(--slide-speed) * 2)`. See [Transition duration](#transition-duration). |
+| `carouselarrowleftsvg` | _(none)_ | An SVG from the media library for the left arrow — its attachment ID or URL. Rendered as inline SVG code, so it takes the arrow color and icon size. Takes precedence over `carouselarrowleftimgurl`. See [Arrow SVGs](#arrow-svgs). |
+| `carouselarrowrightsvg` | _(none)_ | The same for the right arrow. |
+| `carouselarrowleftimgurl` | _(built-in arrow)_ | Image URL for the left arrow, shown as an image. Used when no `carouselarrowleftsvg` is set. |
 | `carouselarrowrightimgurl` | _(built-in arrow)_ | Image URL for the right arrow. Each direction falls back to the built-in arrow independently. |
 | `carouselarrowsize` | `48px` | Width and height of each arrow button. |
 | `carouselarrowiconsize` | `24px` | Width and height of the arrow icon or image inside the button. |
@@ -485,7 +488,7 @@ The default is `grid`, so existing content is unchanged. On a single card, title
 
 Every other collection attribute keeps working unchanged: `multiplegridtext`, `multiplegridsearch`, `multiplegridlimititems`, `multiplegridepisoderange`, `multiplegridshowall`, the search and pagination attributes, `noresults`, every card, overlay, play button, thumbnail, lightbox and podcast player attribute, `showlightbox`, `nostyling`, `{{field}}` references, and stored fields named after an attribute acting as its default (for example a stored field `multiplegridlayout` = `carousel` makes carousels the site default).
 
-**Value formats.** Lengths accept a non-negative number with `px`, `rem`, `em`, `%`, `vw`, `vh` and other CSS length units, a bare number (read as pixels), or a `calc()`, `min()`, `max()` or `clamp()` expression. Percentages are relative to the carousel's width. Colors accept hex (with or without `#`), `rgb()`/`rgba()`/`hsl()`/`hsla()`, a named color such as `transparent`, or a CSS variable such as `var(--e-global-color-primary)`. An invalid or unusable value — a negative length, a zero minimum width or arrow size, anything that is not a length or color — uses that attribute's default.
+**Value formats.** Lengths accept a non-negative number with `px`, `rem`, `em`, `%`, `vw`, `vh` and other CSS length units, a bare number (read as pixels), or a `calc()`, `min()`, `max()` or `clamp()` expression. Percentages are relative to the carousel's width. Colors accept hex (with or without `#`), `rgb()`/`rgba()`/`hsl()`/`hsla()`, a named color such as `transparent`, or a CSS variable such as `var(--e-global-color-primary)`. The transition duration accepts a time in `s` or `ms`, a bare number (milliseconds), or a `var()`, `calc()`, `min()`, `max()` or `clamp()` expression of times and CSS variables. An invalid or unusable value — a negative length or time, a zero minimum width or arrow size, anything that is not a length, color or time — uses that attribute's default.
 
 #### Responsive sizing
 
@@ -517,9 +520,42 @@ When two cards cannot fit, the single card fills the full width — even if that
 - **Trackpads and mice:** two-finger horizontal scrolling and horizontal wheels scroll the row (Shift + wheel also works where the operating system or browser converts it). With a mouse, **click and drag** the row. Every scroll settles on a card edge.
 - A swipe or drag never opens a lightbox or fires `mediaApiWidgetItemClick`; a plain click or tap on a card plays it exactly as in a grid. Arrow clicks never trigger card events.
 - **Keyboard:** the arrows are buttons labelled "Previous item"/"Next item" ("…items" for group steps) with a visible focus ring, operated with Enter or Space; a disabled arrow keeps focus. The row itself is a focus stop when it scrolls: ←/→ move one card, Page Up/Page Down one visible group, Home/End to the first/last position. When keyboard focus moves onto content inside a card that is offscreen (for example a focusable element added by your theme), the carousel scrolls that whole card into view.
-- **Reduced motion:** with the operating system's reduce-motion setting on, arrow and keyboard moves jump without animation.
+- **Reduced motion:** with the operating system's reduce-motion setting on, arrow and keyboard moves jump without animation, whatever the transition duration.
 - **Right-to-left pages:** the carousel starts at the right; the right arrow is "previous" and the left arrow "next".
 - Each carousel is independent, including several carousels of the same playlist on one page. Cards are never cloned.
+
+#### Transition duration
+
+`carouseltransitionduration` (Elementor: **Carousel Navigation → Transition duration**) sets how long each move takes — arrow clicks, the keyboard, and the settle after a mouse drag. The default is `0.25s`. Touch swipes and trackpad scrolling keep the device's own physics.
+
+The value is emitted as the `--maw-carousel-transition-duration` CSS variable on the carousel and resolved by the browser, so you can drive it from your own CSS:
+
+```
+[media-api-widget-render ... multiplegridlayout="carousel" carouseltransitionduration="var(--slide-speed, 300ms)"]
+```
+
+```css
+:root { --slide-speed: 450ms; }
+@media (max-width: 767px) { :root { --slide-speed: 250ms; } }
+```
+
+The variable is read on every move, so a value that changes with a media query or a theme switch applies to the next move. A `var()` with no fallback whose variable is not defined uses `0.25s`. A variable that holds something other than a time (for example `fast`) is invalid CSS, which browsers treat as `0s` — an instant move.
+
+Moves are animated by the script with an ease-in-out curve, because native smooth scrolling runs at a speed only the browser chooses. A swipe, sideways wheel or drag during a move takes over from wherever the row has got to; a second arrow click continues from there to the next card.
+
+#### Arrow SVGs
+
+`carouselarrowleftsvg` / `carouselarrowrightsvg` (Elementor: **Left arrow SVG** / **Right arrow SVG**) replace an arrow with an SVG from the media library, rendered directly into the page as SVG code — the way Elementor's Loop Carousel renders its arrow icons — rather than as an image. As inline SVG it:
+
+- takes the **arrow color** (`carouselarrowcolor`) — unless the SVG sets its own colors, which it keeps; a stroke-based icon with `fill="none"` stays unfilled;
+- is sized by the **arrow icon size** (`carouselarrowiconsize`), and scales even if the file has only a width and height;
+- is decorative to screen readers (`aria-hidden`); the arrow button keeps its "Previous item"/"Next item" label.
+
+In the shortcode, give the attachment ID (shown in the media library's URL when you edit the file, `post.php?post=123`) or the file's media-library URL. In Elementor, use the picker: **Upload SVG** to upload a file or choose one already in the media library. Elementor asks an administrator to turn on *Enable Unfiltered File Uploads* the first time an SVG is uploaded, as it does for the Loop Carousel; WordPress blocks SVG uploads otherwise.
+
+An SVG is placed in the page only after it has been rebuilt from an allowlist of drawing elements (`path`, `circle`, `rect`, `g`, gradients, clip paths, masks, …) and presentation attributes. Scripts, event handlers, links and `href`s, `<style>` blocks, `<foreignObject>`, external `url()` references, comments and DTDs are removed, and a file that declares entities, does not parse, or is over 256 KB is not used. The SVG must be a media-library attachment of type `image/svg+xml`; remote URLs are never fetched (use `carouselarrowleftimgurl` for an image hosted elsewhere). An SVG that cannot be used falls back to the arrow image, then to the built-in arrow.
+
+Styles inside an SVG's own `<style>` block (common in Illustrator exports) are removed, so those shapes take the arrow color instead. Export with presentation attributes (`fill="#…"`) to keep multiple colors.
 
 #### Searchable carousels
 
@@ -547,7 +583,7 @@ A new search or result page replaces the carousel, and the new one starts at its
 
 #### `nostyling` and carousels
 
-`nostyling="true"` removes the plugin's **appearance** styles: the cards are unstyled exactly as in a `nostyling` grid, and the arrow buttons lose their round shape, colors and hover effect (`carouselarrowcolor` and `carouselarrowbackground` therefore have no effect; their values stay available as the `--maw-carousel-arrow-color` / `--maw-carousel-arrow-background` CSS variables). The carousel's **functional layout** is kept, because it cannot work without it: the scrolling row and snapping, card sizing, arrow placement and size (`carouselarrowsize`, `carouselarrowiconsize`, `carouselarrowoffset`), hidden and disabled arrow states, and focus rings. Style the [hook classes](#styling-hooks) — for example `.maw-carousel-arrow` and `.maw-carousel-arrow[aria-disabled="true"]` — to design your own arrows.
+`nostyling="true"` removes the plugin's **appearance** styles: the cards are unstyled exactly as in a `nostyling` grid, and the arrow buttons lose their round shape, colors and hover effect (`carouselarrowcolor` and `carouselarrowbackground` therefore have no effect; their values stay available as the `--maw-carousel-arrow-color` / `--maw-carousel-arrow-background` CSS variables, and an inline arrow SVG takes the button's text color). The carousel's **functional layout** is kept, because it cannot work without it: the scrolling row and snapping, card sizing, arrow placement and size (`carouselarrowsize`, `carouselarrowiconsize`, `carouselarrowoffset`), hidden and disabled arrow states, and focus rings. Style the [hook classes](#styling-hooks) — for example `.maw-carousel-arrow` and `.maw-carousel-arrow[aria-disabled="true"]` — to design your own arrows.
 
 #### Limitations
 
@@ -590,6 +626,22 @@ A new search or result page replaces the carousel, and the new one starts at its
 ]
 ```
 
+**Inline SVG arrows in the brand color, with slower moves:**
+```
+[media-api-widget-render
+    playlist_name="my_show"
+    media_platform="youtube"
+    multiplegrid="true"
+    multiplegridlayout="carousel"
+    carouselarrowleftsvg="123"
+    carouselarrowrightsvg="124"
+    carouselarrowcolor="var(--e-global-color-primary)"
+    carouselarrowbackground="transparent"
+    carouselarrowiconsize="2rem"
+    carouseltransitionduration="0.6s"
+]
+```
+
 **Podcast episodes with a brand-colored arrow from a stored field:**
 ```
 [media-api-widget-render
@@ -627,7 +679,7 @@ Every rendered element carries a namespaced `maw-` **hook class** in addition to
 | Playlist heading / overlay sub-text | `maw-playlist-episode-text` / `maw-sub-text` |
 | Carousel container / scrolling row / track / slide | `maw-carousel` / `maw-carousel-viewport` / `maw-carousel-track` / `maw-carousel-slide` |
 | Carousel arrow button | `maw-carousel-arrow` ＋ `maw-carousel-arrow-left` / `maw-carousel-arrow-right` (state: `[aria-disabled="true"]`) |
-| Carousel arrow icon or image | `maw-carousel-arrow-icon` |
+| Carousel arrow icon or image | `maw-carousel-arrow-icon` (an inline arrow SVG also has `maw-carousel-arrow-svg`) |
 
 The carousel's functional layout is attached to `data-maw-carousel*` attributes rather than to these classes, so the hook classes stay free of plugin CSS; the arrow appearance uses the `media-carousel` / `media-carousel-arrow` styling classes, which `nostyling` omits. The script also sets `data-maw-carousel-mode` (`static`, `gutter` or `overlay`) on the container, usable in your own selectors.
 
@@ -803,7 +855,7 @@ The runner exits non-zero if any assertion fails. Groups live in `tests/cases/`:
 | `options` | The new defaults, and that installs saved before the guard settings existed receive them at read time without the stored option being rewritten. |
 | `podcast` | That podcast, Apple/iTunes, and embed paths consume no YouTube budget, take no YouTube lock, and still work when the YouTube budget is exhausted. |
 | `elementor-integration` | That widget output is byte-identical to direct calls of the matching shortcode methods; that default, explicit false, empty, literal and stored-field settings map correctly and same-named stored fields still act as defaults; that hidden settings never reach the renderer; that widgets dispatch through the registered callback and its tag filters; that isolated and connected search grids stay independent while shortcode grids keep their id, grid key, settings transient and AJAX page parameter; that player styling overrides apply only to the widget call; that an editor render cannot request a podcast feed; and that nothing registers or fatals without Elementor. |
-| `carousel` | That the grid stays the default and unknown layouts fall back to it; that carousel cards are byte-identical to the grid's cards for the same filters, text, card, lightbox and podcast attributes, in the static, initial searchable and AJAX paths; zero, one and many items; length and color validation with safe defaults; arrow images, step and labels; `nostyling`; stored-field references and defaults; that a searchable carousel stores its validated configuration, includes it in its grid key, and keeps it across search and pagination; and that Classic and Atomic widget settings render byte-identically to the shortcode, with hidden carousel controls never reaching the renderer. |
+| `carousel` | That the grid stays the default and unknown layouts fall back to it; that carousel cards are byte-identical to the grid's cards for the same filters, text, card, lightbox and podcast attributes, in the static, initial searchable and AJAX paths; zero, one and many items; length and color validation with safe defaults; arrow images, step and labels; `nostyling`; stored-field references and defaults; that a searchable carousel stores its validated configuration, includes it in its grid key, and keeps it across search and pagination; and that Classic and Atomic widget settings render byte-identically to the shortcode, with hidden carousel controls never reaching the renderer.; transition duration validation (times, bare milliseconds, CSS variables and math functions, injection attempts); the arrow SVG allowlist sanitizer (hostile elements, attributes, external references, entities, malformed and oversized files), inline arrow SVG rendering and fallbacks, and SVG picker values from both widgets. |
 | `backup-inventory` | That the API Stats backup columns resolve the same file the media pipeline writes, report `time_stored` (falling back to the file time), keep YouTube and podcast backups separate, and report nothing for a missing file, an unsupported media type, or an empty slug. |
 | `media-post-index` | The stored-post content model: post type, taxonomies and public meta registration; identity (video ID, podcast GUID with fallbacks, CDATA and attribute-carrying GUIDs) and field mapping; idempotent upserts that never duplicate; transcript and enrichment preservation; deduplicated scheduling; the backfill; and `media_api_widget_rebuild_post_index()`. |
 | `post-storage` | Per-playlist post storage: off by default and isolated per playlist; initial population without removals; in-place updates that keep post IDs, clear vanished values and keep editorial status and enrichment; bounded, deduplicated background batches; removal only after a complete refresh — never after failed, partial or malformed refreshes, the six-item limit, a cache miss, an enrichment write, unidentifiable items, partial write failures, or a newer refresh mid-pass; retries and their limit; lock contention; stopping on disable or removal while keeping posts; capability and per-playlist nonce checks on Resync and Delete; the ID and other builder fields; the Click Action link; podcast season/episode numbering and order; loop ordering and Post Types Order; REST nulls; the read-only edit screen; and the admin menu order and highlighting. |
@@ -1219,11 +1271,15 @@ Both widgets expose the [carousel](#carousel-layout) through the same shared set
 | **Grid & Carousel** | Layout — *Default (Grid)*, *Grid*, *Carousel*, or a stored field | `multiplegridlayout` |
 | **Grid & Carousel** | Gap / Minimum item width | `multiplegridgap` / `multiplegridminsize` |
 | **Carousel Navigation** | Arrow step — *One item* or *Visible group* | `carouselstep` |
+| **Carousel Navigation** | Transition duration | `carouseltransitionduration` |
+| **Carousel Navigation** | Left arrow SVG / Right arrow SVG — *Upload SVG* | `carouselarrowleftsvg` / `carouselarrowrightsvg` |
 | **Carousel Navigation** | Left arrow image / Right arrow image | `carouselarrowleftimgurl` / `carouselarrowrightimgurl` |
 | **Carousel Navigation** | Arrow button size, Arrow icon size, Arrow color, Arrow background, Arrow offset | `carouselarrowsize`, `carouselarrowiconsize`, `carouselarrowcolor`, `carouselarrowbackground`, `carouselarrowoffset` |
 
 - The Layout control appears for the *Grid or carousel* and *Searchable grid or carousel with pagination* outputs. **Carousel Navigation** appears once Layout is *Carousel* (or a stored field, which may resolve to carousel); while Layout is *Default* or *Grid* its values are never passed to the renderer.
+- Arrow SVGs use Elementor's SVG picker in both widgets — the Classic widget's is the Loop Carousel's inline icon picker limited to **Upload SVG** — so you can upload an SVG or choose one from the media library. The SVG is passed to the shortcode as its attachment ID (Classic) or URL (Atomic); both render the same inline SVG.
 - Arrow images use Elementor's media library picker in the Classic widget. The Atomic widget takes an image URL, the same way its other image settings do.
+- Transition duration is a text field, so it accepts CSS variables and `calc()` as well as times.
 - Colors take a color picker (Classic, with transparency) or a CSS color value (Atomic).
 - Every control offers *Default*, a value, and stored fields, exactly like the other settings.
 
@@ -1428,6 +1484,12 @@ Only posts the plugin generated for that playlist can be removed; a post of anot
   - A searchable carousel stores a `carousel` entry with its search settings and includes it in its grid key; grids store and hash exactly as before.
   - The Elementor output modes are relabelled *Grid or carousel* and *Searchable grid or carousel with pagination*, the **Grid** section is now **Grid & Carousel** (with **Minimum column width** renamed **Minimum item width**), and a **Carousel Navigation** section is added. Stored values and existing widgets are unchanged.
   - The front-end script adds `window.mawCarousel`; asset URLs carry `?ver=6.1.0`, so caches pick up the new CSS and JavaScript.
+- 6.1.1 adds the [transition duration](#transition-duration) and [arrow SVGs](#arrow-svgs) to the carousel. Grids are unaffected, and carousels that set neither keep their look:
+  - New shortcode attributes `carouseltransitionduration`, `carouselarrowleftsvg` and `carouselarrowrightsvg`, with matching Elementor controls in **Carousel Navigation**. Existing attributes and saved widget values are unchanged.
+  - Arrow moves are now animated by the script over the transition duration (default `0.25s`) instead of the browser's native smooth scrolling, whose speed varied by browser. Moves still end on a card edge, and reduce-motion still makes them instant.
+  - Asset URLs carry `?ver=6.1.1`, so caches pick up the new CSS and JavaScript.
+  - The carousel's inline style adds `--maw-carousel-transition-duration`. A searchable carousel's stored settings add `arrowleftsvg`, `arrowrightsvg` and `transition` entries, so its grid key changes once and a fresh search configuration is stored on first view; settings stored by 6.1.0 still render, with the defaults.
+  - The Atomic widget uses Elementor's atomic SVG picker (`Svg_Control`) where Elementor provides it, as Elementor 4.x does; on an Elementor version without it, the arrow SVG settings fall back to a text field for the SVG's media-library URL or attachment ID, and the widget registers as before.
 - [Stored playlist posts](#stored-playlist-posts-loop-grid--page-builders), added in 6.1.0, are opt-in per playlist: until a playlist turns on **Store playlist items as WordPress posts**, no post is created, no synchronization is scheduled, no menu entry appears, and Elementor's Loop Grid does not list the post type. Changes visible to existing installs:
   - The `maw_media_item` post type and the `maw_playlist` and `maw_media_type` taxonomies are registered on every site. They have no front-end URLs, are excluded from search, and stay out of menus until used.
   - The first entry of the **Media API** menu is labelled **Playlist Settings**; it is the same page **Media API** always opened. When posts are stored, **All Media Items** and the per-playlist views are listed in this menu rather than a separate one.

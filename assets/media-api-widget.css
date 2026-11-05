@@ -774,6 +774,16 @@
                 -webkit-user-select: none;
                 user-select: none;
             }
+            /*
+             * The script animates arrow, keyboard and drag-release moves over
+             * --maw-carousel-transition-duration. Snapping (and any theme
+             * scroll-behavior: smooth) is off while it does, or each frame
+             * would be pulled back to a card; every move ends on a card.
+             */
+            [data-maw-carousel] > [data-maw-carousel-viewport][data-maw-animating] {
+                scroll-snap-type: none;
+                scroll-behavior: auto;
+            }
             [data-maw-carousel][data-maw-carousel-mode="gutter"] > [data-maw-carousel-viewport],
             [data-maw-carousel][data-maw-carousel-mode="overlay"] > [data-maw-carousel-viewport] {
                 cursor: grab;

@@ -1453,9 +1453,11 @@
 // and Shift+wheel scrolling, and focus scrolling are the browser's own. This
 // module adds container-based card sizing, the arrow buttons, mouse
 // click-and-drag, keyboard keys, and suppression of the click that ends a drag
-// so a drag can never open a lightbox. Cards are never cloned or re-rendered,
-// and playlist/lightbox initialization is never touched: card clicks keep going
-// to the existing delegated handlers.
+// so a drag can never open a lightbox. Arrow, keyboard and drag-release moves
+// are animated by the script over --maw-carousel-transition-duration, since
+// native smooth scrolling runs at a fixed, browser-chosen speed. Cards are
+// never cloned or re-rendered, and playlist/lightbox initialization is never
+// touched: card clicks keep going to the existing delegated handlers.
 
 (function () {
     "use strict";
@@ -1464,6 +1466,7 @@
     var DRAG_THRESHOLD = 6;    // px of mouse travel before a press becomes a drag
     var SETTLE_DELAY   = 140;  // ms without scroll events that counts as settled
     var DEFAULT_MIN    = 400;  // px, if the minimum item width cannot be resolved
+    var DEFAULT_SPEED  = 250;  // ms, the transition duration when none resolves (shortcode default 0.25s)
 
     if (typeof WeakMap !== "function") {
         // Without it the markup still scrolls natively; arrows stay hidden.
@@ -1480,6 +1483,11 @@
 
     function reducedMotion() {
         return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    }
+
+    // Cubic ease-in-out, t in [0, 1].
+    function ease(t) {
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     }
 
     function childWith(parent, attribute, value) {
@@ -1521,6 +1529,7 @@
         this.settleTimer        = null;
         this.scrollFrame        = 0;
         this.layoutFrame        = 0;
+        this.animFrame          = 0;      // non-zero while a move is animating
         this.layoutKey          = "";
         this.listeners          = [];
         this.observer           = null;
@@ -1565,6 +1574,12 @@
         this.on(this.viewport, "pointerup", function (e) { self.endDrag(e); });
         this.on(this.viewport, "pointercancel", function (e) { self.endDrag(e); });
         this.on(this.viewport, "lostpointercapture", function (e) { self.endDrag(e); });
+        // A sideways wheel or trackpad scroll takes over from an animated move.
+        this.on(this.viewport, "wheel", function (e) {
+            if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+                self.interruptAnimation();
+            }
+        }, { passive: true });
         this.on(this.viewport, "dragstart", function (e) {
             if (self.mode !== "static") {
                 e.preventDefault();
@@ -1607,6 +1622,7 @@
         clearTimeout(this.settleTimer);
         if (this.scrollFrame) { cancelAnimationFrame(this.scrollFrame); }
         if (this.layoutFrame) { cancelAnimationFrame(this.layoutFrame); }
+        this.cancelAnimation();
 
         if (this.probe && this.probe.parentNode) {
             this.probe.parentNode.removeChild(this.probe);
@@ -1618,6 +1634,7 @@
         this.el.style.removeProperty("--maw-carousel-gutter");
         this.el.removeAttribute("data-maw-carousel-mode");
         this.viewport.removeAttribute("data-maw-dragging");
+        this.viewport.removeAttribute("data-maw-animating");
         this.viewport.setAttribute("tabindex", "0");
         if (this.generatedId) {
             this.viewport.removeAttribute("id");
@@ -1647,22 +1664,30 @@
         return out;
     };
 
-    // Resolves the configured lengths (px, rem, em, %, vw, calc(), …) to px in
-    // one style read. Margin and padding percentages resolve against the
-    // carousel's width, so a percentage means a share of the carousel.
-    Carousel.prototype.measure = function () {
+    // A hidden element whose computed style resolves the carousel's CSS
+    // variables: lengths through its margin and padding, the transition
+    // duration through transition-duration (transition-property is none, so
+    // nothing on it ever animates).
+    Carousel.prototype.probeElement = function () {
         if (!this.probe || this.probe.parentNode !== this.el) {
             var probe = this.el.ownerDocument.createElement("span");
             probe.setAttribute("aria-hidden", "true");
             probe.style.cssText =
                 "position:absolute;top:0;left:0;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;border:0;" +
                 "margin:0 var(--maw-carousel-gap, 48px) 0 var(--maw-carousel-min, 400px);" +
-                "padding:0 var(--maw-carousel-arrow-offset, 12px) 0 var(--maw-carousel-arrow-size, 48px);";
+                "padding:0 var(--maw-carousel-arrow-offset, 12px) 0 var(--maw-carousel-arrow-size, 48px);" +
+                "transition-property:none;transition-duration:var(--maw-carousel-transition-duration, " + DEFAULT_SPEED + "ms);";
             this.el.appendChild(probe);
             this.probe = probe;
         }
+        return this.probe;
+    };
 
-        var style = window.getComputedStyle(this.probe);
+    // Resolves the configured lengths (px, rem, em, %, vw, calc(), …) to px in
+    // one style read. Margin and padding percentages resolve against the
+    // carousel's width, so a percentage means a share of the carousel.
+    Carousel.prototype.measure = function () {
+        var style = window.getComputedStyle(this.probeElement());
 
         return {
             min:    parseFloat(style.marginLeft) || 0,
@@ -1670,6 +1695,21 @@
             arrow:  parseFloat(style.paddingLeft) || 0,
             offset: parseFloat(style.paddingRight) || 0
         };
+    };
+
+    // The transition duration in ms. The browser resolves it, so var()
+    // references to the site's own variables and calc()/min()/max()/clamp()
+    // work; it is read on every move, so a variable that changes later (a
+    // media query, a theme switch) applies to the next move. An undefined
+    // variable falls back to the default.
+    Carousel.prototype.transitionDuration = function () {
+        var value = window.getComputedStyle(this.probeElement()).transitionDuration || "";
+        var match = /^\s*(\d*\.?\d+(?:e[+-]?\d+)?)(m?s)\b/i.exec(value);
+        if (!match) {
+            return DEFAULT_SPEED;
+        }
+        var ms = parseFloat(match[1]) * (match[2].toLowerCase() === "ms" ? 1 : 1000);
+        return isFinite(ms) && ms >= 0 ? ms : DEFAULT_SPEED;
     };
 
     Carousel.prototype.scheduleLayout = function () {
@@ -1808,17 +1848,79 @@
     Carousel.prototype.scrollToIndex = function (index, smooth) {
         var offset   = this.offsetFor(index);
         var left     = this.rtl ? -offset : offset;
-        var behavior = smooth && !reducedMotion() ? "smooth" : "auto";
+        var duration = smooth && !reducedMotion() ? this.transitionDuration() : 0;
 
         this.programmatic = true;
+        clearTimeout(this.settleTimer);
 
+        // A move started mid-animation continues from where the previous one
+        // got to. Snapping stays off in between, so nothing jumps.
+        this.cancelAnimation();
+
+        if (duration > 0 && Math.abs(left - this.viewport.scrollLeft) > 1) {
+            this.animateTo(left, duration);
+            return;
+        }
+
+        this.viewport.removeAttribute("data-maw-animating");
         if (typeof this.viewport.scrollTo === "function") {
-            this.viewport.scrollTo({ left: left, behavior: behavior });
+            this.viewport.scrollTo({ left: left, behavior: "auto" });
         } else {
             this.viewport.scrollLeft = left;
         }
 
-        this.armSettle(behavior === "smooth" ? 1000 : SETTLE_DELAY);
+        this.armSettle(SETTLE_DELAY);
+    };
+
+    // Scrolls the viewport to `left` (a physical scrollLeft) over `duration`
+    // ms. Native smooth scrolling cannot be timed, so the script animates.
+    // Snapping is off while it runs (data-maw-animating), otherwise each
+    // intermediate frame would snap back to a card; the move ends on a card.
+    Carousel.prototype.animateTo = function (left, duration) {
+        var self     = this;
+        var viewport = this.viewport;
+        var from     = viewport.scrollLeft;
+        var start    = performance.now();
+
+        viewport.setAttribute("data-maw-animating", "");
+
+        var frame = function (now) {
+            var t = clamp((now - start) / duration, 0, 1);
+            viewport.scrollLeft = t < 1 ? from + (left - from) * ease(t) : left;
+
+            if (t < 1) {
+                self.animFrame = requestAnimationFrame(frame);
+                return;
+            }
+
+            self.animFrame = 0;
+            viewport.removeAttribute("data-maw-animating");
+            self.settle();
+        };
+
+        this.animFrame = requestAnimationFrame(frame);
+    };
+
+    // Stops a running animation where it is, leaving snapping off for the
+    // caller to restore. Returns whether one was running.
+    Carousel.prototype.cancelAnimation = function () {
+        if (!this.animFrame) {
+            return false;
+        }
+        cancelAnimationFrame(this.animFrame);
+        this.animFrame = 0;
+        return true;
+    };
+
+    // The visitor takes over mid-animation (touch, sideways wheel): native
+    // scrolling and snapping carry on from where the animation got to.
+    Carousel.prototype.interruptAnimation = function () {
+        if (!this.cancelAnimation()) {
+            return;
+        }
+        this.viewport.removeAttribute("data-maw-animating");
+        this.programmatic = false;
+        this.armSettle(SETTLE_DELAY);
     };
 
     Carousel.prototype.armSettle = function (delay) {
@@ -1850,7 +1952,9 @@
         clearTimeout(this.settleTimer);
         this.settleTimer = null;
 
-        if (this.destroyed || (this.drag && this.drag.moved)) {
+        // Every animation frame is a scroll, so scrollend can fire mid-move;
+        // the animation settles itself when it ends.
+        if (this.destroyed || this.animFrame || (this.drag && this.drag.moved)) {
             return;
         }
 
@@ -1883,8 +1987,8 @@
 
     Carousel.prototype.goTo = function (index) {
         var target = clamp(index, 0, this.maxIndex);
-        if (target === this.index && Math.abs(this.position() - this.offsetFor(target)) <= 1) {
-            return;
+        if (target === this.index && (this.animFrame || Math.abs(this.position() - this.offsetFor(target)) <= 1)) {
+            return; // Already there, or already on its way.
         }
         this.index = target;
         this.scrollToIndex(target, true);
@@ -1983,7 +2087,12 @@
 
     // Mouse click-and-drag scrolling. Touch and pen use native scrolling.
     Carousel.prototype.onPointerDown = function (event) {
-        if (event.pointerType !== "mouse" || event.button !== 0 || this.mode === "static") {
+        if (event.pointerType !== "mouse") {
+            // Touch and pen scroll natively, taking over from an animated move.
+            this.interruptAnimation();
+            return;
+        }
+        if (event.button !== 0 || this.mode === "static") {
             return;
         }
 
@@ -2024,6 +2133,16 @@
                 // Capture is an enhancement; dragging works without it.
             }
             this.viewport.setAttribute("data-maw-dragging", "");
+            // An animated move may still be running (or have moved the row
+            // since the press): the drag continues from where the row is now,
+            // and counts from the card nearest it rather than the move's
+            // target. Read before the animation hands snapping back, so
+            // nothing snaps.
+            drag.scroll = this.viewport.scrollLeft;
+            drag.start  = Math.round(this.fraction());
+            if (this.cancelAnimation()) {
+                this.viewport.removeAttribute("data-maw-animating");
+            }
             var selection = window.getSelection ? window.getSelection() : null;
             if (selection && selection.removeAllRanges) {
                 selection.removeAllRanges();
