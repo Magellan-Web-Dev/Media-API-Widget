@@ -873,6 +873,14 @@ A few front-end behaviors are covered by JavaScript tests in `tests/js/`. They l
 node --test "tests/js/*.test.mjs"
 ```
 
+The main suite never loads Elementor. `tests/elementor-atomic-compat.php` does: it loads a real Elementor copy's atomic classes through Elementor's own autoloader and checks the Atomic widget against them. It declares the Atomic widget, the Classic widget and the dynamic tags, which makes PHP verify every overridden method signature. It then builds the editor controls through Elementor's `get_atomic_controls()`, with Elementor debug mode on so an invalid control throws, and serializes the controls and props schema the way the editor config does. A control method missing from that Elementor version fails here instead of in the editor. Run it once per Elementor copy:
+
+```
+php tests/elementor-atomic-compat.php /path/to/wp-content/plugins/elementor
+```
+
+The `elementor-integration` group runs it automatically, each in its own process, against the sibling `plugins/elementor` install and any copies listed in `MAW_ELEMENTOR_PATHS` (separated by `:`). With neither available, that case prints a skip note. Run it after every Elementor update: the Atomic Widgets API is still experimental and changes between minor versions. The widget is created without its constructor, so this check does not replace opening the editor.
+
 The runner exits non-zero if any assertion fails. Groups live in `tests/cases/`:
 
 | Group | Covers |
@@ -883,7 +891,7 @@ The runner exits non-zero if any assertion fails. Groups live in `tests/cases/`:
 | `cache-integrity` | That a partial or failed refresh leaves the backup file, the transient, and the last-fetched timestamp untouched, and that the existing back-off and backup-window short-circuits still work. |
 | `options` | The new defaults, and that installs saved before the guard settings existed receive them at read time without the stored option being rewritten. |
 | `podcast` | That podcast, Apple/iTunes, and embed paths consume no YouTube budget, take no YouTube lock, and still work when the YouTube budget is exhausted. |
-| `elementor-integration` | That widget output is byte-identical to direct calls of the matching shortcode methods; that default, explicit false, empty, literal and stored-field settings map correctly and same-named stored fields still act as defaults; that hidden settings never reach the renderer; that widgets dispatch through the registered callback and its tag filters; that isolated and connected search grids stay independent while shortcode grids keep their id, grid key, settings transient and AJAX page parameter; that player styling overrides apply only to the widget call; that an editor render cannot request a podcast feed; and that nothing registers or fatals without Elementor. |
+| `elementor-integration` | That widget output is byte-identical to direct calls of the matching shortcode methods; that default, explicit false, empty, literal and stored-field settings map correctly and same-named stored fields still act as defaults; that hidden settings never reach the renderer; that widgets dispatch through the registered callback and its tag filters; that isolated and connected search grids stay independent while shortcode grids keep their id, grid key, settings transient and AJAX page parameter; that player styling overrides apply only to the widget call; that an editor render cannot request a podcast feed; that nothing registers or fatals without Elementor; and, where Elementor sources are available, that the Atomic widget's editor controls build against them (see above). |
 | `carousel` | That the grid stays the default and unknown layouts fall back to it; that carousel cards are byte-identical to the grid's cards for the same filters, text, card, lightbox and podcast attributes, in the static, initial searchable and AJAX paths; zero, one and many items; length and color validation with safe defaults; arrow images, step and labels; `nostyling`; stored-field references and defaults; that a searchable carousel stores its validated configuration, includes it in its grid key, and keeps it across search and pagination; and that Classic and Atomic widget settings render byte-identically to the shortcode, with hidden carousel controls never reaching the renderer.; transition duration validation (times, bare milliseconds, CSS variables and math functions, injection attempts); the arrow SVG allowlist sanitizer (hostile elements, attributes, external references, entities, malformed and oversized files), inline arrow SVG rendering and fallbacks, and SVG picker values from both widgets. |
 | `backup-inventory` | That the API Stats backup columns resolve the same file the media pipeline writes, report `time_stored` (falling back to the file time), keep YouTube and podcast backups separate, and report nothing for a missing file, an unsupported media type, or an empty slug. |
 | `media-post-index` | The stored-post content model: post type, taxonomies and public meta registration; identity (video ID, podcast GUID with fallbacks, CDATA and attribute-carrying GUIDs) and field mapping; idempotent upserts that never duplicate; transcript and enrichment preservation; deduplicated scheduling; the backfill; and `media_api_widget_rebuild_post_index()`. |
@@ -1256,6 +1264,8 @@ When Elementor is active the plugin adds two widgets. Both render through the pl
 
 The playlist selectors list the configured Media Items by name only. API keys, playlist IDs and feed URLs are never sent to the editor.
 
+**Elementor versions.** The Atomic widget uses only the atomic control and prop-type methods that every checked version provides. Its editor controls have been built against the Elementor 3.35.0, 3.35.3, 4.0.4, 4.2.0, 4.3.1, 4.3.6 and 4.4.0 sources with [`tests/elementor-atomic-compat.php`](#tests). Elementor builds every registered widget's controls when the editor loads, including for popups and templates that don't contain the widget, so a control method missing from the installed version breaks the whole editor. Elementor's Atomic Widgets API is still experimental, so check the widget again after each Elementor update. The live editor preview of the Atomic widget uses Elementor's `render_atomic_element` request, which the 4.0.4 and 3.35.x sources don't contain. On those versions the editor shows the widget's "rendered by the server" notice in place of the preview; the front end is unaffected.
+
 ### Output modes
 
 | Mode | Renders through |
@@ -1540,6 +1550,10 @@ Only posts the plugin generated for that playlist can be removed; a post of anot
   - Existing podcasts stay full until **Load full playlist** is unchecked. New playlists of either type start limited to 6.
   - Rows saved from 6.2.0 carry a `playlist_limit` key (a whole number, default 6).
   - **Resync now** and **Delete stored posts** now return to Playlist Settings with their notice. Before, they finished their work and then showed a blank page.
+- 6.2.1 fixes a fatal error that stopped the Elementor editor from loading (pages, popups and templates alike) on Elementor versions other than 4.3.x: `Call to undefined method Svg_Control::set_show_icon_library()`. The Atomic widget's arrow SVG controls called a method that exists only in Elementor 4.3.x. Elementor 4.4.0 removed it, and versions before 4.3 never had it. Changes visible to existing installs:
+  - The call is gone. The arrow SVG controls still use Elementor's SVG picker (upload or media library). On Elementor 4.3.x the picker is identical, because the removed call only restated that version's default (no icon library).
+  - Saved widgets, their settings and their front-end output are unchanged. No setting, prop, shortcode attribute or stored value changed.
+  - Asset URLs carry `?ver=6.2.1`.
 - [Stored playlist posts](#stored-playlist-posts-loop-grid--page-builders), added in 6.1.0, are opt-in per playlist: until a playlist turns on **Store playlist items as WordPress posts**, no post is created, no synchronization is scheduled, no menu entry appears, and Elementor's Loop Grid does not list the post type. Changes visible to existing installs:
   - The `maw_media_item` post type and the `maw_playlist` and `maw_media_type` taxonomies are registered on every site. They have no front-end URLs, are excluded from search, and stay out of menus until used.
   - The first entry of the **Media API** menu is labelled **Playlist Settings**; it is the same page **Media API** always opened. When posts are stored, **All Media Items** and the per-playlist views are listed in this menu rather than a separate one.

@@ -217,8 +217,11 @@ final class AtomicWidget extends Atomic_Widget_Base
                 if ($spec['kind'] === 'number') {
                     $value = Number_Control::bind_to($valueKey)->set_min(0)->set_step(1)->set_should_force_int(true);
                 } elseif ($spec['kind'] === 'svg' && self::svgPickerAvailable()) {
-                    // Upload an SVG or choose one from the media library.
-                    $value = Svg_Control::bind_to($valueKey)->set_show_icon_library(false);
+                    // Upload an SVG or choose one from the media library. Only
+                    // the base control API is used: Elementor 4.3 alone had
+                    // set_show_icon_library() (removed in 4.4, absent before
+                    // 4.3), and its default there was already `false`.
+                    $value = Svg_Control::bind_to($valueKey);
                 } else {
                     $value = Text_Control::bind_to($valueKey);
                 }

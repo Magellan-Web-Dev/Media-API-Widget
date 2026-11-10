@@ -18,6 +18,8 @@
  * Elementor itself is not loaded. The widget classes are thin wrappers that
  * hand their settings to {@see WidgetRenderer}; their behavior inside a real
  * Elementor install is verified separately in an isolated WordPress instance.
+ * The last case runs tests/elementor-atomic-compat.php, in a child process,
+ * against any Elementor copy available on disk.
  */
 
 declare(strict_types=1);
@@ -644,5 +646,34 @@ return [
         maw_assert_same([], $manager->registered, 'no widget is registered while Widget_Base is undefined');
         maw_assert_same(false, Integration::atomicAvailable(), 'the atomic widget reports unavailable');
         maw_assert(!class_exists('MediaApiWidget\\Integrations\\Elementor\\ClassicWidget', false), 'the classic widget class was never loaded');
+    },
+
+    // -- Real Elementor sources ---------------------------------------------
+
+    'the atomic widget builds its editor controls against each available Elementor copy' => static function (): void {
+        // The sibling plugins/elementor install, plus any copies listed in
+        // MAW_ELEMENTOR_PATHS (separated by the OS path separator). Each runs
+        // in its own process: loading Elementor here would break the
+        // "without Elementor" case above.
+        $paths = array_filter(explode(PATH_SEPARATOR, (string) getenv('MAW_ELEMENTOR_PATHS')));
+        if (is_file(dirname(__DIR__, 3) . '/elementor/includes/autoloader.php')) {
+            $paths[] = dirname(__DIR__, 3) . '/elementor';
+        }
+
+        if ($paths === []) {
+            echo "    (skipped: no Elementor copy found; set MAW_ELEMENTOR_PATHS)\n";
+            return;
+        }
+
+        foreach (array_unique($paths) as $path) {
+            $output = [];
+            exec(
+                escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/elementor-atomic-compat.php') . ' ' . escapeshellarg($path) . ' 2>&1',
+                $output,
+                $exitCode
+            );
+
+            maw_assert_same(0, $exitCode, 'atomic widget is compatible with ' . ($output[0] ?? $path) . ($exitCode === 0 ? '' : "\n" . implode("\n", $output)));
+        }
     },
 ];
